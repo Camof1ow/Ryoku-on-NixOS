@@ -113,7 +113,7 @@ let
   };
 
   # 공식 릴리스에는 x86_64 리눅스 바이너리만 있다. 다른 아키텍처는 같은 태그를
-  # 서브모듈(ncnn, 이미지 코덱)째 받아 소스에서 빌드하고 같은 위치에 설치한다.
+  # 서브모듈째 받아 소스에서 빌드하고 같은 위치에 설치한다.
   fromSource = pkgs.stdenv.mkDerivation {
     pname = "waifu2x-ncnn-vulkan";
     inherit version;
@@ -130,12 +130,27 @@ let
 
     nativeBuildInputs = [
       pkgs.cmake
+      pkgs.pkg-config
       pkgs.autoAddDriverRunpath
+    ];
+
+    # 번들 코덱은 ExternalProject가 CMAKE_INSTALL_INCLUDEDIR 아래에 설치하는데,
+    # nixpkgs는 이 값을 절대 경로로 넘겨 헤더를 못 찾는다(jpeglib.h). x86_64 공식
+    # 바이너리처럼 nixpkgs의 코덱 라이브러리를 쓴다. ncnn은 계속 번들로 빌드한다.
+    cmakeFlags = [
+      "-DUSE_SYSTEM_JPEG=ON"
+      "-DUSE_SYSTEM_PNG=ON"
+      "-DUSE_SYSTEM_WEBP=ON"
+      "-DUSE_SYSTEM_ZLIB=ON"
     ];
 
     buildInputs = [
       pkgs.vulkan-headers
       pkgs.vulkan-loader
+      pkgs.libjpeg_turbo
+      pkgs.libpng
+      pkgs.libwebp
+      pkgs.zlib
     ];
 
     installPhase = ''
