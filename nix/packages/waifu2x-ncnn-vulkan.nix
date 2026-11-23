@@ -123,7 +123,7 @@ let
       repo = "waifu2x-ncnn-vulkan";
       tag = version;
       fetchSubmodules = true;
-      hash = pkgs.lib.fakeHash;
+      hash = "sha256-V1ZeLNjt5VZGVfhkaHMYd1Np9FYs15W4pby2QFgKyv8=";
     };
 
     sourceRoot = "source/src";
