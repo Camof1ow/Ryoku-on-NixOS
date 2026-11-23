@@ -124,6 +124,15 @@ detect_hardware_profile() {
   fi
 }
 
+# compgen은 nixpkgs의 비대화형 bash에 들어 있지 않다. 접두어로 시작하는 경로가 있는지 본다.
+path_prefix_exists() {
+  local candidate
+  for candidate in "$1"*; do
+    [ -e "$candidate" ] && return 0
+  done
+  return 1
+}
+
 # Snapdragon 노트북의 기기 전용 펌웨어(GPU zap, ADSP·CDSP 등)는 linux-firmware에 없고
 # Windows 드라이버 저장소에만 있다. 디스크를 지우기 전에 작업 폴더(RAM)로 복사한다.
 backup_windows_firmware() {
@@ -136,8 +145,8 @@ backup_windows_firmware() {
   # 장치 트리가 요구하는 펌웨어 가운데 라이브 시스템에 없는 것만 찾는다.
   while IFS= read -r name; do
     [ -n "$name" ] || continue
-    if ! compgen -G "/run/current-system/firmware/$name*" >/dev/null &&
-      ! compgen -G "/run/current-system/firmware/lib/firmware/$name*" >/dev/null
+    if ! path_prefix_exists "/run/current-system/firmware/$name" &&
+      ! path_prefix_exists "/run/current-system/firmware/lib/firmware/$name"
     then
       wanted+=("$name")
     fi
@@ -153,7 +162,9 @@ backup_windows_firmware() {
     store="$mnt/Windows/System32/DriverStore/FileRepository"
     if run_root test -d "$store"; then
       for name in "${wanted[@]}"; do
-        src="$(run_root find "$store" -type f -iname "$(basename "$name")" -print -quit 2>/dev/null || true)"
+        # 드라이버 폴더가 여러 버전 남아 있으면 가장 최근 파일을 쓴다(Zenbook A14: GPU zap·CDSP 각 2벌).
+        src="$(run_root find "$store" -type f -iname "$(basename "$name")" -printf '%T@ %p\n' 2>/dev/null |
+          sort -rn | head -n 1 | cut -d' ' -f2- || true)"
         [ -n "$src" ] || continue
         run_root install -D -m 0644 -o "$(id -u)" -g "$(id -g)" "$src" "$dest/$name"
         # 원격 프로세서가 함께 읽는 *.jsn·*_dtbs.elf는 같은 드라이버 폴더에 있다.
@@ -168,6 +179,35 @@ backup_windows_firmware() {
     [ "$windows_firmware_copied" -eq 0 ] || break
   done < <(lsblk -nrpo PATH,FSTYPE "$install_disk")
   rmdir "$mnt"
+  # install -D가 root 소유로 만든 폴더를 돌려줘야 작업 폴더를 정리할 때 지울 수 있다.
+  [ ! -d "$dest" ] || run_root chown -R "$(id -u):$(id -g)" "$dest"
+}
+
+# 펌웨어를 읽으려고 연 BitLocker 같은 암호화 매핑이 설치 디스크를 붙잡고 있으면 커널이 새 파티션
+# 표를 읽지 못한다(parted mklabel이 "unable to inform the kernel"로 멈춘다).
+close_install_disk_mappings() {
+  local dev type
+  while read -r dev type; do
+    if [ "$type" = crypt ]; then
+      run_root cryptsetup close "$dev"
+    fi
+  done < <(lsblk -nrpo PATH,TYPE "$1")
+}
+
+# Zenbook A14 NVMe의 퀄컴·ASUS 플랫폼 파티션 이름(공장 배치 기준). 지우면 어떤 영향이 있는지 확인되지
+# 않았으므로 남긴다.
+zenbook_platform_partlabels='^(ToolsFv|LogFs|EnterpriseFV|ToolsFv_BACKUP|UpdateCapsule|NHLOS|core_nhlos_a|quantumsdk|quantumfv|catecontentfv|logdump)$'
+
+# 플랫폼 파티션과 ASUS의 MYASUS 파티션을 뺀 나머지(Windows나 이전 설치) 파티션 번호를 출력한다.
+# 플랫폼 파티션이 하나도 없으면 아무것도 출력하지 않는다(디스크 전체를 쓰는 기본 방식으로 간다).
+zenbook_partitions_to_replace() {
+  lsblk -J -o PARTN,PARTLABEL,LABEL,TYPE "$1" | jq -r --arg keep "$zenbook_platform_partlabels" '
+    [.. | objects | select(.type == "part")] as $parts
+    | if any($parts[]; (.partlabel // "") | test($keep)) then
+        $parts[]
+        | select(((.partlabel // "") | test($keep) | not) and (.label // "") != "MYASUS")
+        | .partn
+      else empty end'
 }
 
 # The live ISO exposes its embedded Ryoku tree through /etc/ryoku/source, which
@@ -910,7 +950,7 @@ install_iso() {
       "$install_disk"
     if [ "$assume_yes" -eq 1 ]; then
       [ "${RYOKU_INSTALL_ALLOW_MISSING_FIRMWARE:-0}" = 1 ] ||
-        die "device firmware is missing; turn off BitLocker in Windows, or set RYOKU_INSTALL_ALLOW_MISSING_FIRMWARE=1 to install anyway"
+        die "device firmware is missing; unlock BitLocker read-only (cryptsetup open --type bitlk --readonly) or turn it off in Windows, or set RYOKU_INSTALL_ALLOW_MISSING_FIRMWARE=1 to install anyway"
     else
       printf 'Continue without it? [y/N]: '
       read -r typed
@@ -927,7 +967,20 @@ install_iso() {
     fi
   fi
 
-  printf '\n%s\n' "WARNING: ALL DATA ON $install_disk WILL BE PERMANENTLY ERASED."
+  # Zenbook A14는 퀄컴·ASUS 플랫폼 파티션을 남기고 나머지 파티션만 바꾼다.
+  local replace_list=""
+  local -a replace_parts=()
+  if [ "$firmware" = "uefi" ] && [ "$(detect_hardware_profile)" = asus-zenbook-a14 ]; then
+    replace_list="$(zenbook_partitions_to_replace "$install_disk")"
+    [ -z "$replace_list" ] || mapfile -t replace_parts <<< "$replace_list"
+  fi
+
+  if [ "${#replace_parts[@]}" -gt 0 ]; then
+    printf '\nWARNING: PARTITIONS %s ON %s WILL BE PERMANENTLY ERASED.\n' "${replace_parts[*]}" "$install_disk"
+    printf 'The Qualcomm/ASUS firmware partitions on this disk are kept.\n'
+  else
+    printf '\n%s\n' "WARNING: ALL DATA ON $install_disk WILL BE PERMANENTLY ERASED."
+  fi
   if [ "$assume_yes" -eq 1 ]; then
     [ "$confirm_disk" = "$install_disk" ] || {
       die "--iso --yes requires --confirm-disk $install_disk"
@@ -950,24 +1003,47 @@ install_iso() {
   revalidate_install_disk "$install_disk" "$validated_disk_identity"
 
   echo "@@RYOKU_STEP partition"
-  run_root wipefs -af "$install_disk"
-  run_root parted -s "$install_disk" mklabel gpt
+  close_install_disk_mappings "$install_disk"
 
-  if [ "$firmware" = "uefi" ]; then
-    run_root parted -s -a optimal "$install_disk" mkpart ESP fat32 1MiB 1025MiB
-    run_root parted -s "$install_disk" set 1 esp on
-    run_root parted -s -a optimal "$install_disk" mkpart primary 1025MiB 100%
+  local boot_number=1 root_number=2 number
+  if [ "${#replace_parts[@]}" -gt 0 ]; then
+    local -A used_numbers=()
+    local -a delete_args=()
+    while read -r number; do
+      if [ -n "$number" ]; then used_numbers[$number]=1; fi
+    done < <(lsblk -nro PARTN "$install_disk")
+    for number in "${replace_parts[@]}"; do
+      unset "used_numbers[$number]"
+      delete_args+=(-d "$number")
+    done
+    while [ -n "${used_numbers[$boot_number]:-}" ]; do boot_number=$((boot_number + 1)); done
+    root_number=$((boot_number + 1))
+    while [ -n "${used_numbers[$root_number]:-}" ]; do root_number=$((root_number + 1)); done
+
+    run_root sgdisk "${delete_args[@]}" "$install_disk"
+    # 시작과 끝을 0으로 주면 가장 큰 빈 구간을 쓴다. 지운 Windows 자리가 그 구간이다.
+    run_root sgdisk -n "$boot_number:0:+1G" -t "$boot_number:ef00" -c "$boot_number:EFI" "$install_disk"
+    run_root sgdisk -n "$root_number:0:0" -t "$root_number:8300" -c "$root_number:nixos" "$install_disk"
   else
-    run_root parted -s -a optimal "$install_disk" mkpart BIOSBOOT 1MiB 3MiB
-    run_root parted -s "$install_disk" set 1 bios_grub on
-    run_root parted -s -a optimal "$install_disk" mkpart primary 3MiB 100%
+    run_root wipefs -af "$install_disk"
+    run_root parted -s "$install_disk" mklabel gpt
+
+    if [ "$firmware" = "uefi" ]; then
+      run_root parted -s -a optimal "$install_disk" mkpart ESP fat32 1MiB 1025MiB
+      run_root parted -s "$install_disk" set 1 esp on
+      run_root parted -s -a optimal "$install_disk" mkpart primary 1025MiB 100%
+    else
+      run_root parted -s -a optimal "$install_disk" mkpart BIOSBOOT 1MiB 3MiB
+      run_root parted -s "$install_disk" set 1 bios_grub on
+      run_root parted -s -a optimal "$install_disk" mkpart primary 3MiB 100%
+    fi
   fi
 
   run_root partprobe "$install_disk"
   run_root udevadm settle
 
-  boot_part="$(partition_by_number "$install_disk" 1 || true)"
-  root_part="$(partition_by_number "$install_disk" 2 || true)"
+  boot_part="$(partition_by_number "$install_disk" "$boot_number" || true)"
+  root_part="$(partition_by_number "$install_disk" "$root_number" || true)"
   [ -n "$root_part" ] || die "root partition did not appear after partitioning"
   [ -n "$boot_part" ] || die "boot partition did not appear after partitioning"
 

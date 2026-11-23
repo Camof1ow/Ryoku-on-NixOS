@@ -12,6 +12,8 @@ let
     nix
     nixos-install-tools
     parted
+    gptfdisk
+    cryptsetup
     pciutils
     util-linux
     dosfstools
@@ -52,6 +54,8 @@ pkgs.writeShellApplication {
     nix
     nixos-install-tools
     parted
+    gptfdisk
+    cryptsetup
     pciutils
     util-linux
     dosfstools

@@ -396,6 +396,22 @@
             touch "$out"
           '';
 
+        ryoku-installer-zenbook-partitions = pkgs.runCommand "ryoku-installer-zenbook-partitions-check"
+          {
+            nativeBuildInputs = with pkgs; [
+              bash
+              coreutils
+              gawk
+              gnugrep
+              jq
+            ];
+          }
+          ''
+            RYOKU_INSTALL_BACKEND_SOURCE=${./nix/apps/ryoku-install-backend.sh} \
+              bash ${./nix/tests/test-installer-zenbook-partitions.sh}
+            touch "$out"
+          '';
+
         ryoku-installer-iso = pkgs.runCommand "ryoku-installer-iso-check"
           { nativeBuildInputs = [ pkgs.python3 pkgs.gnugrep ]; }
           ''
