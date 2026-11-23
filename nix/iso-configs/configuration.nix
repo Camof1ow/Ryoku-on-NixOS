@@ -58,6 +58,10 @@ in
   hardware.bluetooth.enable = true;
   services.blueman.enable = true;
 
+  # curl 설치 스크립트로 받는 일반 리눅스용 실행 파일(omp, Antigravity CLI 등)은
+  # /lib/ld-linux-*.so 로더를 찾는다. NixOS에는 그 자리에 안내용 대체 파일만 있어서 실행되지 않는다.
+  programs.nix-ld.enable = true;
+
   # ──────────────────────────────────────────────────────────────────────────
   # Locale / input
   # ──────────────────────────────────────────────────────────────────────────
