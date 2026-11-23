@@ -62,7 +62,8 @@
   # Wi-Fi(ath12k)와 GPU 공용 펌웨어는 linux-firmware에 있다.
   hardware.enableRedistributableFirmware = true;
 
-  # 이 기기의 UEFI 변수 쓰기는 믿을 수 없다. systemd-boot는 기본 부팅 경로
-  # (EFI/BOOT/BOOTAA64.EFI)로만 설치한다.
+  # systemd-boot는 기본 부팅 경로(EFI/BOOT/BOOTAA64.EFI)로만 설치한다. 이 기기의 INSYDE 펌웨어는
+  # 그 경로를 "EFI Hard Drive" 부팅 항목으로 스스로 등록한다. UEFI 변수 쓰기(uefisecapp)도 되지만
+  # 펌웨어에 맡기고 쓰지 않는다(2026-11-24 실기기: efibootmgr 항목이 재부팅 뒤에도 남음).
   boot.loader.efi.canTouchEfiVariables = lib.mkForce false;
 }
