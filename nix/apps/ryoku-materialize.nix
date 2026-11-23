@@ -99,28 +99,42 @@ pkgs.writeShellApplication {
 
     if [ -f "$niri_gpu" ]; then
       tmp="$niri_gpu.ryoku-nix.$$"
-      in_ryoku_nvidia_block=0
+      in_ryoku_block=0
+      blank_lines=0
 
       : > "$tmp"
 
       while IFS= read -r line || [ -n "$line" ]; do
-        if [ "$line" = "// BEGIN RYOKU NIXOS NVIDIA NIRI WORKAROUNDS" ]; then
-          in_ryoku_nvidia_block=1
+        case "$line" in
+          "// BEGIN RYOKU NIXOS "*" NIRI WORKAROUNDS")
+            # 블록 앞에 붙였던 빈 줄도 함께 버려야 로그인할 때마다 빈 줄이 늘지 않는다.
+            blank_lines=0
+            in_ryoku_block=1
+            continue
+            ;;
+          "// END RYOKU NIXOS "*" NIRI WORKAROUNDS")
+            in_ryoku_block=0
+            continue
+            ;;
+        esac
+
+        [ "$in_ryoku_block" -eq 0 ] || continue
+
+        if [ -z "$line" ]; then
+          blank_lines=$((blank_lines + 1))
           continue
         fi
 
-        if [ "$line" = "// END RYOKU NIXOS NVIDIA NIRI WORKAROUNDS" ]; then
-          in_ryoku_nvidia_block=0
-          continue
-        fi
-
-        if [ "$in_ryoku_nvidia_block" -eq 0 ]; then
-          printf '%s\n' "$line" >> "$tmp"
-        fi
+        while [ "$blank_lines" -gt 0 ]; do
+          printf '\n' >> "$tmp"
+          blank_lines=$((blank_lines - 1))
+        done
+        printf '%s\n' "$line" >> "$tmp"
       done < "$niri_gpu"
 
       nvidia_render=0
       other_render=0
+      msm_render=0
 
       for driver_link in /sys/class/drm/renderD*/device/driver; do
         [ -e "$driver_link" ] || continue
@@ -132,6 +146,10 @@ pkgs.writeShellApplication {
         else
           other_render=$((other_render + 1))
         fi
+
+        case "$driver" in
+          msm*) msm_render=$((msm_render + 1)) ;;
+        esac
       done
 
       if [ "$nvidia_render" -gt 0 ] && [ "$other_render" -eq 0 ]; then
@@ -143,6 +161,19 @@ debug {
     emulate-zero-presentation-time
 }
 // END RYOKU NIXOS NVIDIA NIRI WORKAROUNDS
+EOF
+      fi
+
+      # Qualcomm msm(Snapdragon X) 디스플레이는 하드웨어 커서 플레인에 올린 커서를 화면에 내지
+      # 않는다. 커서를 프레임에 합쳐 그리게 한다(2026-11-24 Zenbook A14, msm_dpu에서 확인).
+      if [ "$msm_render" -gt 0 ]; then
+        cat >> "$tmp" <<'EOF'
+
+// BEGIN RYOKU NIXOS MSM NIRI WORKAROUNDS
+debug {
+    disable-cursor-plane
+}
+// END RYOKU NIXOS MSM NIRI WORKAROUNDS
 EOF
       fi
 
