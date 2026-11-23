@@ -64,11 +64,13 @@ jobs:
           nix eval --raw .#packages.aarch64-linux.ryoku-iso-zenbook-a14.drvPath
           echo
 
+      # 빌드 로그 전체(-L)는 수만 줄이라 Actions 화면이 브라우저 메모리를 다 쓴다.
+      # 실패한 빌드만 마지막 200줄을 오류와 함께 남긴다.
       - name: Build installed system
         shell: bash
         run: |
           set -euo pipefail
-          nix build -L --keep-going --no-link --print-out-paths \
+          nix build --keep-going --no-link --print-out-paths --option log-lines 200 \
             .#packages.aarch64-linux.ryoku-zenbook-a14-system
           df -h /
 
@@ -76,7 +78,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          nix build -L --print-out-paths -o result-iso \
+          nix build --print-out-paths --option log-lines 200 -o result-iso \
             .#packages.aarch64-linux.ryoku-iso-zenbook-a14
           ls -la result-iso/iso
           sha256sum result-iso/iso/*.iso | tee result-iso.sha256
