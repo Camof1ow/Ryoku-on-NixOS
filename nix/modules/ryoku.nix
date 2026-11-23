@@ -1183,14 +1183,16 @@ in
 
     # Public binary cache for independently compiled Ryotunes releases.
     # Never distribute the private Cachix authentication token.
+    # arm64 포크는 CI(zenbook-a14-iso.yml)가 빌드 결과를 ryoku-arm 캐시에 올린다.
     nix.settings = lib.mkIf cfg.binaryCache.enable {
-      substituters = lib.mkAfter [
+      substituters = lib.mkAfter ([
         "https://ryotunes.cachix.org"
-      ];
+      ] ++ lib.optional pkgs.stdenv.hostPlatform.isAarch64 "https://ryoku-arm.cachix.org");
 
-      trusted-public-keys = lib.mkAfter [
+      trusted-public-keys = lib.mkAfter ([
         "ryotunes.cachix.org-1:QNocajCsVm/IAMb8LPOWJi72XwqiexW9ec0UqeXLpGs="
-      ];
+      ] ++ lib.optional pkgs.stdenv.hostPlatform.isAarch64
+        "ryoku-arm.cachix.org-1:IBvBuhs6b5jCptOS/vzEWhNXxg36TBKWJYHanaTsWR4=");
     };
 
     # apple-cursor is part of Ryoku's cursor catalogue and is unfree in nixpkgs.

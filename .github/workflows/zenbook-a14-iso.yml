@@ -47,6 +47,16 @@ jobs:
             max-jobs = auto
             cores = 0
 
+      # 빌드 전에 ryoku-arm 캐시에서 받고, 새로 빌드한 경로는 끝날 때 올린다.
+      # 토큰(CACHIX_AUTH_TOKEN)이 없으면 받기만 한다.
+      - name: Use Cachix (ryoku-arm)
+        uses: cachix/cachix-action@v17
+        with:
+          name: ryoku-arm
+          authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
+          # 소스 묶음과 ISO·squashfs 이미지는 크기만 크고 다시 쓸 일이 없어 올리지 않는다.
+          pushFilter: '(-source$|\.iso$|squashfs\.img$)'
+
       - name: Evaluate ISO
         shell: bash
         run: |

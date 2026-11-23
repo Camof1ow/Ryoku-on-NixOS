@@ -42,6 +42,11 @@ windows_firmware_copied=0
 # activates its declarative substituter configuration.
 cache_url="https://ryotunes.cachix.org"
 cache_key="ryotunes.cachix.org-1:QNocajCsVm/IAMb8LPOWJi72XwqiexW9ec0UqeXLpGs="
+# arm64 포크의 CI가 빌드 결과를 올리는 캐시.
+if [ "$(uname -m)" = aarch64 ]; then
+  cache_url="$cache_url https://ryoku-arm.cachix.org"
+  cache_key="$cache_key ryoku-arm.cachix.org-1:IBvBuhs6b5jCptOS/vzEWhNXxg36TBKWJYHanaTsWR4="
+fi
 
 bootstrap_cache=(
   --option extra-substituters "$cache_url"
