@@ -48,7 +48,7 @@ pkgs.stdenv.mkDerivation {
     description = "Ryoku ${provider} window-manager provider";
     homepage = "https://github.com/Ryoku-dev/ryoku-arch";
     license = pkgs.lib.licenses.gpl3Only;
-    platforms = [ "x86_64-linux" ];
+    platforms = [ "x86_64-linux" "aarch64-linux" ];
     mainProgram = "ryoku-wm-${provider}";
   };
 }

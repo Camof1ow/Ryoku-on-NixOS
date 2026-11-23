@@ -82,6 +82,6 @@ pkgs.stdenv.mkDerivation {
     description = "Ryoku desktop command-line control utility";
     homepage = "https://github.com/Ryoku-dev/ryoku-arch";
     license = pkgs.lib.licenses.gpl3Only;
-    platforms = [ "x86_64-linux" ];
+    platforms = [ "x86_64-linux" "aarch64-linux" ];
   };
 }

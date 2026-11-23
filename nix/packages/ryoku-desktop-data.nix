@@ -618,7 +618,7 @@ user chmod -R u+w "$QYLOCK_DIR/themes/clockwork/orbital"'
     description = "Ryoku desktop configuration, assets, applications and integration data";
     homepage = "https://github.com/Ryoku-dev/ryoku-arch";
     license = pkgs.lib.licenses.gpl3Only;
-    platforms = [ "x86_64-linux" ];
+    platforms = [ "x86_64-linux" "aarch64-linux" ];
   };
 
 }

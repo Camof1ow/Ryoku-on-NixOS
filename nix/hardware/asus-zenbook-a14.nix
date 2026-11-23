@@ -1,0 +1,68 @@
+# ASUS Zenbook A14 UX3407RA (Snapdragon X Elite X1E-78-100).
+# kuruczgy/x1e-nixos-config의 modules/x1e80100.nix를 이 기기에 맞춰 옮겼다.
+# 라이브 ISO와 설치된 시스템이 함께 쓴다.
+{ lib, pkgs, ... }:
+
+{
+  hardware.deviceTree = {
+    enable = true;
+    name = "qcom/x1e80100-asus-zenbook-a14.dtb";
+  };
+
+  # 장치 트리와 X1E 드라이버가 온전히 들어 있는 최신 커널을 쓴다.
+  boot.kernelPackages = lib.mkForce pkgs.linuxPackages_latest;
+
+  boot.kernelParams = [
+    "pd_ignore_unused"
+    "clk_ignore_unused"
+  ];
+
+  # 기본 initrd 모듈 목록은 x86 PC 기준이다. 이 기기의 부팅에 필요한 것만 넣는다.
+  boot.initrd.includeDefaultModules = false;
+  boot.initrd.availableKernelModules = [
+    # USB-A·USB-C 부팅
+    "usb_storage"
+    "uas"
+    "phy_qcom_qmp_combo"
+    "phy_qcom_qmp_usb"
+    "phy_snps_eusb2"
+    "phy_qcom_eusb2_repeater"
+    "phy_nxp_ptn3222"
+    "tcsrcc_x1e80100"
+    "ps883x"
+    "pmic_glink_altmode"
+    "qrtr"
+
+    # 키보드·터치패드
+    "i2c_hid_of"
+    "i2c_qcom_geni"
+
+    # 내장 OLED 화면. msm은 모든 DP 출력의 브리지가 준비돼야 화면을 켠다.
+    "dispcc-x1e80100"
+    "gpucc-x1e80100"
+    "phy_qcom_edp"
+    "panel_edp"
+    "panel_samsung_atna33xc20"
+    "msm"
+    "simple_bridge"
+    "display_connector"
+
+    # NVMe
+    "nvme"
+    "phy_qcom_qmp_pcie"
+  ];
+
+  # 커널 충돌이 잦아 x1e-nixos-config도 끈다.
+  boot.blacklistedKernelModules = [ "qcom_iris" ];
+
+  # TPM 드라이버가 없어 systemd가 TPM을 기다리느라 부팅이 1분 넘게 멈춘다.
+  systemd.tpm2.enable = false;
+  boot.initrd.systemd.tpm2.enable = false;
+
+  # Wi-Fi(ath12k)와 GPU 공용 펌웨어는 linux-firmware에 있다.
+  hardware.enableRedistributableFirmware = true;
+
+  # 이 기기의 UEFI 변수 쓰기는 믿을 수 없다. systemd-boot는 기본 부팅 경로
+  # (EFI/BOOT/BOOTAA64.EFI)로만 설치한다.
+  boot.loader.efi.canTouchEfiVariables = lib.mkForce false;
+}

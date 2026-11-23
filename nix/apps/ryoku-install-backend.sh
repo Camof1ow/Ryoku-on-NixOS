@@ -1,6 +1,6 @@
 set -euo pipefail
 
-source_ref="${RYOKU_INSTALL_SOURCE:-github:Ryoku-dev/Ryoku-on-NixOS/main}"
+source_ref="${RYOKU_INSTALL_SOURCE:-github:Camof1ow/Ryoku-on-NixOS/main}"
 source_explicit=0
 flake_arg="/etc/nixos"
 assume_yes=0
@@ -35,6 +35,8 @@ nvidia_open=true
 target_root="${RYOKU_INSTALL_TARGET_ROOT:-/mnt}"
 iso_work=""
 iso_config_templates="@ISO_CONFIGS@"
+windows_firmware_wanted=0
+windows_firmware_copied=0
 
 # Bootstrap the public cache before the new NixOS generation
 # activates its declarative substituter configuration.
@@ -106,6 +108,61 @@ if "\x00" in value or "\n" in value or "\r" in value:
     raise SystemExit("ryoku-install: Nix string values must be single-line")
 print(json.dumps(value).replace("${", "\\${"))
 PY_QUOTE
+}
+
+# 장치 트리 compatible로 Ryoku flake의 기기 모듈(nixosModules.<이름>)을 고른다.
+detect_hardware_profile() {
+  local compatible=/sys/firmware/devicetree/base/compatible
+  [ -r "$compatible" ] || return 0
+  if tr '\0' '\n' < "$compatible" | grep -qx 'asus,zenbook-a14-ux3407ra'; then
+    printf 'asus-zenbook-a14\n'
+  fi
+}
+
+# Snapdragon 노트북의 기기 전용 펌웨어(GPU zap, ADSP·CDSP 등)는 linux-firmware에 없고
+# Windows 드라이버 저장소에만 있다. 디스크를 지우기 전에 작업 폴더(RAM)로 복사한다.
+backup_windows_firmware() {
+  local dest="$1" dt=/sys/firmware/devicetree/base
+  local name part fstype store src extra mnt
+  local -a wanted=()
+
+  [ -d "$dt" ] || return 0
+
+  # 장치 트리가 요구하는 펌웨어 가운데 라이브 시스템에 없는 것만 찾는다.
+  while IFS= read -r name; do
+    [ -n "$name" ] || continue
+    if ! compgen -G "/run/current-system/firmware/$name*" >/dev/null &&
+      ! compgen -G "/run/current-system/firmware/lib/firmware/$name*" >/dev/null
+    then
+      wanted+=("$name")
+    fi
+  done < <(find "$dt" -name firmware-name -type f -exec cat {} + 2>/dev/null | tr '\0' '\n' | sort -u)
+
+  windows_firmware_wanted="${#wanted[@]}"
+  [ "$windows_firmware_wanted" -gt 0 ] || return 0
+
+  mnt="$(mktemp -d)"
+  while read -r part fstype; do
+    [ "$fstype" = ntfs ] || continue
+    run_root mount -t ntfs3 -o ro "$part" "$mnt" 2>/dev/null || continue
+    store="$mnt/Windows/System32/DriverStore/FileRepository"
+    if run_root test -d "$store"; then
+      for name in "${wanted[@]}"; do
+        src="$(run_root find "$store" -type f -iname "$(basename "$name")" -print -quit 2>/dev/null || true)"
+        [ -n "$src" ] || continue
+        run_root install -D -m 0644 -o "$(id -u)" -g "$(id -g)" "$src" "$dest/$name"
+        # 원격 프로세서가 함께 읽는 *.jsn·*_dtbs.elf는 같은 드라이버 폴더에 있다.
+        while IFS= read -r -d '' extra; do
+          run_root install -D -m 0644 -o "$(id -u)" -g "$(id -g)" "$extra" \
+            "$dest/$(dirname "$name")/$(basename "$extra" | tr '[:upper:]' '[:lower:]')"
+        done < <(run_root find "$(dirname "$src")" -maxdepth 1 -type f \( -iname '*.jsn' -o -iname '*_dtbs.elf' \) -print0)
+        windows_firmware_copied=$((windows_firmware_copied + 1))
+      done
+    fi
+    run_root umount "$mnt"
+    [ "$windows_firmware_copied" -eq 0 ] || break
+  done < <(lsblk -nrpo PATH,FSTYPE "$install_disk")
+  rmdir "$mnt"
 }
 
 # The live ISO exposes its embedded Ryoku tree through /etc/ryoku/source, which
@@ -461,6 +518,7 @@ render_iso_target() {
   local apps_block="" gpu_block=""
   local nix_host nix_user nix_ryoku nix_nixpkgs nix_disk
   local nix_timezone nix_locale nix_keyboard nix_firmware
+  local nix_system nix_hardware_profile hardware_profile
   local target_source_ref target_nixpkgs_ref
 
   target_source_ref="$(target_source_ref_for_install)"
@@ -476,6 +534,13 @@ render_iso_target() {
   nix_keyboard="$(nix_quote "$target_keyboard")"
   nix_firmware="$(nix_quote "$firmware")"
   nix_kernel="$(nix_quote "$kernel_choice")"
+  nix_system="$(nix_quote "$(uname -m)-linux")"
+  hardware_profile="$(detect_hardware_profile)"
+  if [ -n "$hardware_profile" ]; then
+    nix_hardware_profile="$(nix_quote "$hardware_profile")"
+  else
+    nix_hardware_profile=null
+  fi
   binary_cache_nix=true
   [ "$use_cache" -eq 1 ] || binary_cache_nix=false
 
@@ -518,6 +583,8 @@ PY_FLAKE
 {
   hostname = $nix_host;
   username = $nix_user;
+  system = $nix_system;
+  hardwareProfile = $nix_hardware_profile;
   firmware = $nix_firmware;
   installDisk = $nix_disk;
   gpuVendors = [
@@ -721,6 +788,10 @@ install_iso() {
     render_iso_target "$iso_work" "$firmware" "$password_hash"
   fi
 
+  if [ "$config_mode" = "ryoku" ] && [ "$dry_run" -eq 0 ]; then
+    backup_windows_firmware "$iso_work/firmware"
+  fi
+
   printf '\nRyoku NixOS full installation\n'
   printf '%s\n' '────────────────────────────────────────'
   printf 'Disk       %s\n' "$install_disk"
@@ -743,6 +814,10 @@ install_iso() {
   printf 'WM         %s\n' "$compositor"
   printf 'Browser    %s\n' "$browser"
   printf 'Shell      %s\n' "$shell_choice"
+  if [ "$windows_firmware_wanted" -gt 0 ]; then
+    printf 'Firmware   %s of %s device file(s) copied from Windows\n' \
+      "$windows_firmware_copied" "$windows_firmware_wanted"
+  fi
   printf 'Ryoku      %s\n' "$target_source_ref"
   if [ "$config_mode" = "ryoku" ]; then
     printf 'Follows    %s\n' "$(target_track_ref_for_install)"
@@ -820,6 +895,30 @@ install_iso() {
       "path:$iso_work#nixosConfigurations.$install_host.config.system.modulesTree"
     then
       die "NVIDIA kernel-module preflight failed before disk changes; retry with --kernel default or another NVIDIA-compatible kernel"
+    fi
+  fi
+
+  if [ "$windows_firmware_copied" -lt "$windows_firmware_wanted" ]; then
+    printf '\nWARNING: %s device firmware file(s) were not found on a readable Windows partition (BitLocker on?).\n' \
+      "$((windows_firmware_wanted - windows_firmware_copied))"
+    printf 'GPU acceleration, sound and battery status may not work, and erasing %s deletes the only copy.\n' \
+      "$install_disk"
+    if [ "$assume_yes" -eq 1 ]; then
+      [ "${RYOKU_INSTALL_ALLOW_MISSING_FIRMWARE:-0}" = 1 ] ||
+        die "device firmware is missing; turn off BitLocker in Windows, or set RYOKU_INSTALL_ALLOW_MISSING_FIRMWARE=1 to install anyway"
+    else
+      printf 'Continue without it? [y/N]: '
+      read -r typed
+      case "$typed" in
+        y|Y|yes|YES) ;;
+        *)
+          trap - EXIT INT TERM
+          rm -rf "$iso_work"
+          iso_work=""
+          printf 'Cancelled. Nothing was changed.\n'
+          return 0
+          ;;
+      esac
     fi
   fi
 
@@ -1272,7 +1371,7 @@ if [ ! -f "$flake_file" ]; then
 
   outputs = { self, nixpkgs, ... }: {
     nixosConfigurations."$current_host" = nixpkgs.lib.nixosSystem {
-      system = "x86_64-linux";
+      system = "$(uname -m)-linux";
 
       modules = [
         ./configuration.nix

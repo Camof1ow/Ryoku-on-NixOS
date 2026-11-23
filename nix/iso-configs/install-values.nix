@@ -7,6 +7,10 @@
   hostname = "ryoku";
   username = "ryoku";
 
+  # NixOS 시스템 이름과 기기 전용 모듈(Ryoku flake의 nixosModules.<이름>, 없으면 null).
+  system = "x86_64-linux";
+  hardwareProfile = null;
+
   firmware = "uefi";
   installDisk = "/dev/sda";
   gpuVendors = [ ];
@@ -38,6 +42,6 @@
     "mise"
   ];
 
-  ryokuSource = "github:Ryoku-dev/Ryoku-on-NixOS/main";
+  ryokuSource = "github:Camof1ow/Ryoku-on-NixOS/main";
   nixpkgsSource = "github:NixOS/nixpkgs/nixos-unstable";
 }

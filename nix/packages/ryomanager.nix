@@ -68,7 +68,7 @@ DESKTOP
     description = "Ryoku-native system task manager";
     homepage = "https://github.com/Ryoku-dev/ryomanager";
     license = pkgs.lib.licenses.gpl3Plus;
-    platforms = [ "x86_64-linux" ];
+    platforms = [ "x86_64-linux" "aarch64-linux" ];
     mainProgram = "ryomanager";
   };
 }

@@ -6,6 +6,11 @@
 
 let
   gpuModule = vendor: ./hardware/gpu/${vendor}.nix;
+
+  # 설치기가 Windows 드라이버 저장소에서 복사한 기기 전용 펌웨어
+  # (Snapdragon 노트북의 GPU zap·ADSP·CDSP 등, linux-firmware에 없다).
+  windowsFirmware = ./firmware;
+  hasWindowsFirmware = builtins.pathExists windowsFirmware;
 in
 {
   imports = [
@@ -32,6 +37,17 @@ in
     latest = pkgs.linuxPackages_latest;
     zen = pkgs.linuxPackages_zen;
   }.${install.kernel};
+
+  hardware.firmware = lib.optional hasWindowsFirmware
+    (pkgs.runCommandLocal "windows-device-firmware" { } ''
+      mkdir -p "$out/lib/firmware"
+      cp -r ${windowsFirmware}/. "$out/lib/firmware/"
+    '');
+
+  # GPU·원격 프로세서 드라이버가 initrd에서부터 이 펌웨어를 찾는다.
+  boot.initrd.extraFirmwarePaths = lib.optionals hasWindowsFirmware
+    (map (file: lib.removePrefix "${toString windowsFirmware}/" (toString file))
+      (lib.filesystem.listFilesRecursive windowsFirmware));
 
   # ──────────────────────────────────────────────────────────────────────────
   # Machine identity / networking

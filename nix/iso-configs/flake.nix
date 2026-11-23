@@ -7,7 +7,7 @@
     # exact revisions tested by the ISO, so future `nix flake update` calls can
     # advance normally instead of pinning users forever.
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
-    ryoku.url = "github:Ryoku-dev/Ryoku-on-NixOS/main";
+    ryoku.url = "github:Camof1ow/Ryoku-on-NixOS/main";
   };
 
   outputs = { nixpkgs, ryoku, ... }@inputs:
@@ -16,7 +16,7 @@
     in
     {
       nixosConfigurations.ryoku = nixpkgs.lib.nixosSystem {
-        system = "x86_64-linux";
+        system = install.system or "x86_64-linux";
         specialArgs = {
           inherit inputs install;
         };
@@ -24,7 +24,8 @@
           ryoku.nixosModules.default
           ./ryoku.nix
           ./configuration.nix
-        ];
+        ] ++ nixpkgs.lib.optional ((install.hardwareProfile or null) != null)
+          ryoku.nixosModules.${install.hardwareProfile};
       };
     };
 }

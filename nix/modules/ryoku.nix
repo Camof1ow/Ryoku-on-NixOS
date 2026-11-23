@@ -1,4 +1,4 @@
-{ self, ryokuNixpkgs, hermesAgent, ryokuUpstream }:
+{ self, ryokuNixpkgsBySystem, hermesAgent, ryokuUpstream }:
 
 { config, lib, pkgs, options, ... }:
 
@@ -6,6 +6,7 @@ let
   cfg = config.programs.ryoku;
 
   system = pkgs.stdenv.hostPlatform.system;
+  ryokuNixpkgs = ryokuNixpkgsBySystem.${system};
 
   # Keep legacy NixOS customizations available during migration.
   legacyRyokuPkgs = self.packages.${system};
@@ -28,7 +29,8 @@ let
   ryokuSystemBridge = ryokuPkgs.ryoku-nixos-system-bridge;
   ryokuDesktopData = ryokuPkgs.ryoku-desktop-data;
   ryokuRyogami = ryokuPkgs.ryoku-ryogami;
-  ryokuSkwdPaper = ryokuPkgs.ryoku-skwd-paper;
+  # skwd-paper가 없는 아키텍처(arm64)에서는 null이다.
+  ryokuSkwdPaper = ryokuPkgs.ryoku-skwd-paper or null;
   ryokuPaletteBridge = ryokuPkgs.ryoku-palette-bridge;
   ryokuQuickshell = ryokuNixpkgs.quickshell;
 
@@ -732,7 +734,6 @@ EOF
     ryokuSddmThemeApply
     ryokuSddmTheme
     ryokuPkgs.gpk
-    ryokuSkwdPaper
 
     # ─────────────────────────────────────────────────────────
     # Standard userspace expected by Ryoku's shell snippets
@@ -905,6 +906,7 @@ EOF
     xdg-utils
   ]
   ++ lib.optional (ryokuPreviewSharePicker != null) ryokuPreviewSharePicker
+  ++ lib.optional (ryokuSkwdPaper != null) ryokuSkwdPaper
   ++ optionalRuntime
   ++ optionalAppPackages
   ++ browserPackages;

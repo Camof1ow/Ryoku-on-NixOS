@@ -68,6 +68,6 @@ pkgs.stdenv.mkDerivation {
     description = "Ryoku Settings and Hub backend";
     homepage = "https://github.com/Ryoku-dev/ryoku-arch";
     license = pkgs.lib.licenses.gpl3Only;
-    platforms = [ "x86_64-linux" ];
+    platforms = [ "x86_64-linux" "aarch64-linux" ];
   };
 }

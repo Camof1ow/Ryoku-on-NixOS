@@ -66,7 +66,8 @@
           [ "" "" ]
           (builtins.readFile ./VERSION);
 
-      system = "x86_64-linux";
+      # arm64 포크: x86_64와 aarch64 두 시스템용 출력을 만든다.
+      systems = [ "x86_64-linux" "aarch64-linux" ];
 
       quickshellScreencopyFixOverlay = final: prev: {
         quickshell = prev.quickshell.overrideAttrs (old: {
@@ -79,14 +80,21 @@
         });
       };
 
-      pkgs = import ryokuPackagesNixpkgs {
-        inherit system;
-        overlays = [
-          quickshellScreencopyFixOverlay
-        ];
-      };
+      ryokuPkgsBySystem = nixpkgs.lib.genAttrs systems (system:
+        import ryokuPackagesNixpkgs {
+          inherit system;
+          overlays = [
+            quickshellScreencopyFixOverlay
+          ];
+        });
 
-      skwdPaper = skwdWall.packages.${system}.skwd-paper;
+      outputsFor = system:
+    let
+      pkgs = ryokuPkgsBySystem.${system};
+
+      # skwd-paper는 x86_64 바이너리로만 배포된다. 다른 아키텍처에서는 뺀다
+      # (Wallpaper Engine 장면 렌더러 전용이고, 장면을 받는 Steam도 arm64 리눅스에서 안 돈다).
+      skwdPaper = skwdWall.packages.${system}.skwd-paper or null;
 
       ryoku = import ./nix/packages {
         inherit
@@ -138,23 +146,25 @@
       ryokuNixosModule =
         import ./nix/modules/ryoku.nix {
           inherit self hermesAgent ryokuUpstream;
-          ryokuNixpkgs = pkgs;
+          ryokuNixpkgsBySystem = ryokuPkgsBySystem;
         };
 
-      ryokuRepo = "github:Ryoku-dev/Ryoku-on-NixOS";
+      ryokuRepo = "github:Camof1ow/Ryoku-on-NixOS";
 
       # Bootable Ryoku-on-NixOS live/install image. The live environment tracks
       # the flake's nixos-unstable input; Ryoku-owned packages remain pinned to
       # Ryoku's separate package universe. Both are locked by flake.lock.
       # `channel` is the branch installed systems follow afterwards.
+      isoSpecialArgs = channel: {
+        inherit self ryokuInstall ryokuRepo;
+        ryokuIsoChannel = channel;
+        ryokuIsoNixpkgsRev = nixpkgs.rev or "";
+        ryokuIsoRyokuRev = self.rev or "";
+      };
+
       mkRyokuIso = channel: nixpkgs.lib.nixosSystem {
         inherit system;
-        specialArgs = {
-          inherit self ryokuInstall ryokuRepo;
-          ryokuIsoChannel = channel;
-          ryokuIsoNixpkgsRev = nixpkgs.rev or "";
-          ryokuIsoRyokuRev = self.rev or "";
-        };
+        specialArgs = isoSpecialArgs channel;
         modules = [ ./nix/iso ];
       };
 
@@ -164,6 +174,8 @@
         nvidiaBranch ? "stable",
         nvidiaOpen ? true,
         kernel ? "default",
+        optionalApps ? [ "prompt" ],
+        extraModules ? [ ],
       }:
         nixpkgs.lib.nixosSystem {
           inherit system;
@@ -182,7 +194,7 @@
               compositor = "hyprland";
               browser = "chromium";
               shell = "fish";
-              optionalApps = [ "prompt" ];
+              inherit optionalApps;
               binaryCache = true;
               ryokuSource = "${ryokuRepo}/unstable-dev";
               nixpkgsSource = "github:NixOS/nixpkgs/nixos-unstable";
@@ -192,33 +204,79 @@
             ryokuNixosModule
             ./nix/iso-configs/ryoku.nix
             ./nix/iso-configs/configuration.nix
-          ];
+          ] ++ extraModules;
         };
+
+      # ── ASUS Zenbook A14 UX3407RA (aarch64) ─────────────────────────────
+      # 설치기 기본 앱(ryoku-install-backend.sh의 default_apps)과 같은 구성으로 미리 빌드해
+      # ISO에 넣는다. 설치 때 같은 nixpkgs·Ryoku 리비전으로 평가하므로 패키지를 다시 빌드하지 않는다.
+      zenbookSystem = mkIsoConfigSystem {
+        kernel = "latest";
+        optionalApps = [ "prompt" "fastfetch" "yazi" "cli-tools" "pavucontrol" "songrec" "openrgb" "upscale" "gamescope" "gamemode" "mangohud" "vm" "docker" "mise" ];
+        extraModules = [ ./nix/hardware/asus-zenbook-a14.nix ];
+      };
+
+      # 라이브 ISO의 GRUB가 장치 트리(DTB)를 읽게 하는 iso-image 패치
+      # (NixOS/nixpkgs#396334, kuruczgy/x1e-nixos-config와 같은 커밋).
+      nixpkgsIsoDevicetree = nixpkgs.legacyPackages.${system}.applyPatches {
+        name = "nixpkgs-iso-devicetree";
+        src = nixpkgs;
+        patches = [
+          (nixpkgs.legacyPackages.${system}.fetchpatch {
+            url = "https://github.com/NixOS/nixpkgs/commit/de1fdb6310af8f70c98746ba4550dc2799a03621.patch";
+            hash = "sha256-brqJxblmqWFAk8JgxmxXeHoiaWiQtsCsOzht/WlH5eE=";
+          })
+        ];
+      };
+
+      zenbookIso = import "${nixpkgsIsoDevicetree}/nixos/lib/eval-config.nix" {
+        inherit system;
+        specialArgs = isoSpecialArgs "main";
+        modules = [
+          ./nix/iso
+          ./nix/hardware/asus-zenbook-a14.nix
+          ./nix/iso/zenbook-a14.nix
+          { isoImage.storeContents = [ zenbookSystem.config.system.build.toplevel ]; }
+        ];
+      };
     in
     {
       lib.version = version;
 
       nixosModules.default = ryokuNixosModule;
+      nixosModules.asus-zenbook-a14 = ./nix/hardware/asus-zenbook-a14.nix;
 
-      # Installs follow unstable-dev; ryoku-iso-stable is for images built from main.
-      nixosConfigurations.ryoku-iso = mkRyokuIso "unstable-dev";
-      nixosConfigurations.ryoku-iso-stable = mkRyokuIso "main";
+      nixosConfigurations =
+        if system == "x86_64-linux" then {
+          # Installs follow unstable-dev; ryoku-iso-stable is for images built from main.
+          ryoku-iso = mkRyokuIso "unstable-dev";
+          ryoku-iso-stable = mkRyokuIso "main";
 
-      # Evaluation-only configuration: never activated by the installer.
-      nixosConfigurations.ryoku-iso-upstream-validation =
-        (mkIsoConfigSystem { }).extendModules {
-          modules = [
-            { programs.ryoku.upstreamPackages.enable = true; }
-          ];
+          # Evaluation-only configuration: never activated by the installer.
+          ryoku-iso-upstream-validation =
+            (mkIsoConfigSystem { }).extendModules {
+              modules = [
+                { programs.ryoku.upstreamPackages.enable = true; }
+              ];
+            };
+        } else {
+          ryoku-zenbook-a14 = zenbookSystem;
+          ryoku-iso-zenbook-a14 = zenbookIso;
         };
 
-      packages.${system} = {
+      packages.${system} = nixpkgs.lib.optionalAttrs (system == "x86_64-linux") {
         ryoku-upstream-desktop = ryokuUpstream.packages.${system}.ryoku-desktop;
         ryoku-upstream-nixos-bundle = ryokuUpstreamNixosBundle;
-        ryoku-install = ryokuInstall;
-        ryoku-install-backend = ryokuInstallBackend;
         ryoku-iso = self.nixosConfigurations.ryoku-iso.config.system.build.isoImage;
         ryoku-iso-stable = self.nixosConfigurations.ryoku-iso-stable.config.system.build.isoImage;
+      } // nixpkgs.lib.optionalAttrs (system == "aarch64-linux") {
+        ryoku-zenbook-a14-system = zenbookSystem.config.system.build.toplevel;
+        ryoku-iso-zenbook-a14 = zenbookIso.config.system.build.isoImage;
+      } // nixpkgs.lib.optionalAttrs (ryoku.skwdPaper != null) {
+        ryoku-skwd-paper = ryoku.skwdPaper;
+      } // {
+        ryoku-install = ryokuInstall;
+        ryoku-install-backend = ryokuInstallBackend;
         # The system a default install builds; nix-cache.yml pushes it to the
         # binary cache so installs and updates download Ryoku instead of
         # compiling it.
@@ -242,7 +300,6 @@
         ryoku-ryovm-helpers = ryoku.ryovmHelpers;
         ryoku-livewall = ryoku.livewall;
         ryoku-ryogami = ryoku.ryogami;
-        ryoku-skwd-paper = ryoku.skwdPaper;
         ryoku-ryotunes = ryoku.ryotunes;
         ryomanager = ryoku.ryomanager;
         ryotunes-unwrapped = ryoku.ryotunesUnwrapped;
@@ -814,5 +871,17 @@
           export GOTOOLCHAIN=local
         '';
       };
+    };
+
+      x86 = outputsFor "x86_64-linux";
+      arm = outputsFor "aarch64-linux";
+    in
+    {
+      inherit (x86) lib nixosModules;
+      nixosConfigurations = x86.nixosConfigurations // arm.nixosConfigurations;
+      packages = x86.packages // arm.packages;
+      apps = x86.apps // arm.apps;
+      checks = x86.checks;
+      devShells = x86.devShells // arm.devShells;
     };
 }

@@ -136,7 +136,14 @@ let
   # only the wrapper is instantiated here so it links against Ryoku's own
   # QML modules (`qml` below) instead of a second copy from another input.
   ryotunesUnwrapped =
-    ryotunesNix.packages.${pkgs.stdenv.hostPlatform.system}.ryotunes-unwrapped;
+    ryotunesNix.packages.${pkgs.stdenv.hostPlatform.system}.ryotunes-unwrapped
+      # RyotunesNix는 x86_64 출력만 낸다. 다른 아키텍처에서는 같은 레시피를
+      # Ryoku의 패키지 세트(같은 nixpkgs 리비전)로 빌드한다.
+      or ((pkgs.callPackage "${ryotunesNix}/nix/package.nix" {
+        src = ryotunesNix.outPath;
+      }).overrideAttrs (old: {
+        meta = old.meta // { platforms = [ "x86_64-linux" "aarch64-linux" ]; };
+      }));
 
   ryotunes = pkgs.callPackage "${ryotunesNix}/nix/wrapper.nix" {
     inherit ryotunesUnwrapped;
@@ -226,7 +233,7 @@ let
         inherit description;
         homepage = "https://github.com/Ryoku-dev/ryoku-arch";
         license = pkgs.lib.licenses.gpl3Only;
-        platforms = [ "x86_64-linux" ];
+        platforms = [ "x86_64-linux" "aarch64-linux" ];
       };
     };
 
@@ -263,7 +270,7 @@ let
       description = "Combined Ryoku Qt/QML module tree";
       homepage = "https://github.com/Ryoku-dev/ryoku-arch";
       license = pkgs.lib.licenses.gpl3Only;
-      platforms = [ "x86_64-linux" ];
+      platforms = [ "x86_64-linux" "aarch64-linux" ];
     };
   } ''
     mkdir -p "$out/${qmlRoot}/Ryoku"
@@ -302,7 +309,7 @@ let
       description = "Complete Ryoku desktop runtime bundle";
       homepage = "https://github.com/Ryoku-dev/ryoku-arch";
       license = pkgs.lib.licenses.gpl3Only;
-      platforms = [ "x86_64-linux" ];
+      platforms = [ "x86_64-linux" "aarch64-linux" ];
     };
 
     paths = [
@@ -318,7 +325,6 @@ let
       ryovmHelpers
       livewall
       ryogami
-      skwdPaper
       ryotunes
       ryomanager
       qmkHid
@@ -330,7 +336,7 @@ let
       helpers
       nixosSystemBridge
       qml
-    ];
+    ] ++ pkgs.lib.optional (skwdPaper != null) skwdPaper;
   };
 in
 {

@@ -99,6 +99,6 @@ SH
     homepage =
       "https://github.com/Ryoku-dev/ryoku";
     license = pkgs.lib.licenses.mit;
-    platforms = [ "x86_64-linux" ];
+    platforms = [ "x86_64-linux" "aarch64-linux" ];
   };
 }

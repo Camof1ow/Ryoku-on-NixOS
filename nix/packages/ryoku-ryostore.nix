@@ -41,6 +41,6 @@ pkgs.stdenv.mkDerivation {
     description = "RyoStore catalogue and installation backend";
     homepage = "https://github.com/Ryoku-dev/ryoku-arch";
     license = pkgs.lib.licenses.gpl3Plus;
-    platforms = [ "x86_64-linux" ];
+    platforms = [ "x86_64-linux" "aarch64-linux" ];
   };
 }
