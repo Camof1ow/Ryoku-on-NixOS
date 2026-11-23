@@ -8,6 +8,11 @@
   # x86 위주의 전체 하드웨어 모듈 대신 기기 모듈만 initrd에 넣는다.
   hardware.enableAllHardware = lib.mkForce false;
 
+  # Ventoy는 initrd의 udev 훅에서 device-mapper로 ISO 파일을 블록 장치로 만든다.
+  # includeDefaultModules = false가 기본 dm_mod를 빼므로 다시 넣고, udev보다 먼저 올린다
+  # (Ventoy 훅의 insmod 대체 경로는 .ko.zst만 풀고, nixpkgs 모듈은 .ko.xz다).
+  boot.initrd.kernelModules = [ "dm_mod" ];
+
   boot.supportedFilesystems = {
     zfs = lib.mkForce false;
     cifs = lib.mkForce false;
