@@ -7,6 +7,35 @@
   hardware.deviceTree = {
     enable = true;
     name = "qcom/x1e80100-asus-zenbook-a14.dtb";
+    # X1(Hamoa)은 CPU 클러스터가 가장 깊은 유휴 상태(cluster_cl5)에 들어간 뒤
+    # DC ZVA가 꺼진 캐시를 건드리면 패닉 기록 없이 SoC가 리셋된다. 업스트림 RFC
+    # "arm64: dts: qcom: hamoa: Drop cluster_cl5 idle state from CPU clusters"와
+    # 같게 cl5를 뺀다. 이 기기에서 x1e-crash 재현기가 cl5가 있을 때 리셋되고,
+    # 뺀 뒤에는 10분 넘게 리셋되지 않았다. 대가는 유휴 전력이 조금 느는 것이다.
+    overlays = [
+      {
+        name = "x1e-drop-cluster-cl5";
+        dtsText = ''
+          /dts-v1/;
+          /plugin/;
+          / {
+            compatible = "qcom,x1e80100";
+            fragment@0 {
+              target-path = "/psci/power-domain-cpu-cluster0";
+              __overlay__ { domain-idle-states = <&cluster_cl4>; };
+            };
+            fragment@1 {
+              target-path = "/psci/power-domain-cpu-cluster1";
+              __overlay__ { domain-idle-states = <&cluster_cl4>; };
+            };
+            fragment@2 {
+              target-path = "/psci/power-domain-cpu-cluster2";
+              __overlay__ { domain-idle-states = <&cluster_cl4>; };
+            };
+          };
+        '';
+      }
+    ];
   };
 
   # 장치 트리와 X1E 드라이버가 온전히 들어 있는 최신 커널을 쓴다.
