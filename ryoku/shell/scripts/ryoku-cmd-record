@@ -10,10 +10,15 @@
 # signals, because a SIGINT can truncate a container before its moov atom is
 # written.
 #
+# On a GPU GSR cannot drive (it probes AMD, Intel and NVIDIA; freedreno on
+# Snapdragon answers "unknown gpu vendor"), the capture falls back to wf-recorder:
+# compositor screencopy, encoded by a V4L2 mem2mem H.264 encoder when the kernel
+# exposes one, else libx264. That backend stops on SIGINT and cannot pause.
+#
 #   ryoku-cmd-record start [--fullscreen|--region [--geometry WxH+X+Y]|--monitor NAME]
 #                          [--with-desktop-audio] [--with-microphone-audio] [--discord]
 #   ryoku-cmd-record stop            -> finalizes via gsr-cli, prints the saved path
-#   ryoku-cmd-record status          -> "recording" | "idle"
+#   ryoku-cmd-record status          -> "recording" (exit 0) | "idle" (exit 1)
 #   ryoku-cmd-record pause|resume    -> gsr-cli set-paused true|false
 #   ryoku-cmd-record info            -> JSON backend/encoder readout for the Hub
 #   ryoku-cmd-record                 (bare) -> toggle: start fullscreen, else stop
@@ -171,9 +176,35 @@ mkdir -p "$STATE_DIR" 2>/dev/null || true
 
 # gsr-cli answers on the IPC socket only for the instance this script launched, so
 # it is the exact, Ryoku-scoped liveness check -- a foreign gpu-screen-recorder is
-# invisible to it.
+# invisible to it. The wf-recorder fallback is recognised by the pid this script
+# recorded, so a foreign wf-recorder stays invisible too.
 recorder_running() {
-  gsr-cli -ipc "$GSR_SOCKET" status >/dev/null 2>&1
+  gsr-cli -ipc "$GSR_SOCKET" status >/dev/null 2>&1 || wf_recorder_running
+}
+
+wf_recorder_running() {
+  local pid
+  pid="$(cat "$PID_FILE" 2>/dev/null || true)"
+  [[ $pid =~ ^[0-9]+$ && $(cat "/proc/$pid/comm" 2>/dev/null) == wf-recorder ]]
+}
+
+# GSR is usable when it can probe this GPU's encoders at all.
+gsr_usable() {
+  command -v gpu-screen-recorder >/dev/null 2>&1 || return 1
+  [[ $(gpu-screen-recorder --info 2>/dev/null || true) == *section=video_codecs* ]]
+}
+
+# A V4L2 stateful encoder (Qualcomm Iris names itself qcom-iris-encoder) that
+# FFmpeg's h264_v4l2m2m can drive.
+v4l2_encoder_present() {
+  local name
+  for name in /sys/class/video4linux/video*/name; do
+    [[ -r $name ]] || continue
+    local label
+    label="$(cat "$name")"
+    [[ ${label,,} == *encoder* ]] && return 0
+  done
+  return 1
 }
 
 # ── focused output through the seam (compositor-neutral). Empty when it cannot be
@@ -353,14 +384,20 @@ report_failure() {
 run_capture() {
   rm -f "$STOP_FILE"
   "$@" 2>"$LOG_FILE" &
-  local pid=$!
+  finish_capture "$!"
+}
+
+# publish the running capture's pid + status for the shell, wait on it, and turn
+# its exit into the script's result.
+finish_capture() {
+  local pid="$1"
   printf '%s\n' "$pid" >"$PID_FILE"
   write_status "$pid"
 
-  # `wait` under errexit must not take the script down on GSR's own exit code.
+  # `wait` under errexit must not take the script down on the recorder's exit code.
   local status=0
   wait "$pid" || status=$?
-  # No file means nothing was recorded, whenever GSR stopped: say why.
+  # No file means nothing was recorded, whenever the recorder stopped: say why.
   if [[ ! -s $OUTPUT_PATH ]]; then
     report_failure
     return 1
@@ -453,6 +490,10 @@ maybe_compress_recording() {
 start_recording() {
   if recorder_running; then
     notify "Screen recording" "A recording is already running"
+    return 0
+  fi
+  if ! gsr_usable && command -v wf-recorder >/dev/null 2>&1; then
+    start_recording_wf
     return 0
   fi
   require_command gpu-screen-recorder "GPU Screen Recorder"
@@ -568,6 +609,132 @@ start_recording() {
   ((DISCORD)) && maybe_compress_recording "$OUTPUT_PATH"
 }
 
+# ── wf-recorder fallback. Same settings file, output naming, status file and
+# saved hook as the GSR path; only the capture command differs.
+WF_PID=""
+
+# Start the capture and wait until it writes past the container header. Iris on
+# X1E80100 sometimes fails while powering up: the firmware reports a system error,
+# and wf-recorder then sits on the 48-byte header and ignores SIGINT. A start that
+# writes nothing within 3 s is killed so the caller can retry. -D keeps frames
+# flowing on a still screen, so silence really means a stuck encoder.
+spawn_wf_recorder() {
+  local _
+  rm -f "$OUTPUT_PATH"
+  "$@" 2>"$LOG_FILE" &
+  WF_PID=$!
+  for _ in $(seq 30); do
+    if [[ $(stat -c %s "$OUTPUT_PATH" 2>/dev/null || echo 0) -gt 4096 ]]; then
+      return 0
+    fi
+    kill -0 "$WF_PID" 2>/dev/null || break
+    sleep 0.1
+  done
+  kill -KILL "$WF_PID" 2>/dev/null || true
+  wait "$WF_PID" 2>/dev/null || true
+  return 1
+}
+
+start_recording_wf() {
+  rm -f "$PID_FILE" "$STOP_FILE" "$STATUS_FILE"
+
+  local -a target=()
+  case "$MODE" in
+  region)
+    local geom="$REGION_GEOM"
+    if [[ -z $geom ]]; then
+      require_command slurp slurp
+      geom="$(slurp -f '%wx%h+%x+%y' 2>/dev/null || true)"
+      [[ -n $geom ]] || exit 0
+    fi
+    if [[ ! $geom =~ ^([0-9]+)x([0-9]+)\+([0-9]+)\+([0-9]+)$ ]]; then
+      notify -u critical "Screen recording failed" "Invalid region: $geom"
+      echo "ryoku-cmd-record: invalid region: $geom" >&2
+      exit 1
+    fi
+    target=(-g "${BASH_REMATCH[3]},${BASH_REMATCH[4]} ${BASH_REMATCH[1]}x${BASH_REMATCH[2]}")
+    ;;
+  monitor)
+    validate_monitor_name "$MONITOR_NAME"
+    target=(-o "$MONITOR_NAME")
+    ;;
+  *)
+    local out
+    out="$(focused_output || true)"
+    if [[ -n $out ]]; then target=(-o "$out"); fi
+    ;;
+  esac
+
+  local fps bitrate encoder container
+  fps="${RYOKU_RECORD_FPS:-$(cfg_get '.fps' 60)}"
+  bitrate="${RYOKU_RECORD_BITRATE:-$(cfg_get '.bitrate' 20000)}"
+  encoder="${RYOKU_RECORD_ENCODER:-$(cfg_get '.encoder' gpu)}"
+  container="${RYOKU_RECORD_CONTAINER:-$(cfg_get '.container' mp4)}"
+  [[ $container == webm ]] && container=mp4
+
+  # wf-recorder records one PulseAudio/PipeWire device.
+  local -a audio=()
+  ACTIVE_AUDIO_MODE=none
+  AUDIO_FALLBACK=false
+  case "$AUDIO_MODE" in
+  system | both)
+    if default_sink_present; then
+      audio=("--audio=$(pactl get-default-sink).monitor")
+      ACTIVE_AUDIO_MODE=system
+      if [[ $AUDIO_MODE == both ]]; then
+        AUDIO_FALLBACK=true
+        notify "Recorder audio" "This recorder takes one audio device. Recording desktop audio only."
+      fi
+    else
+      AUDIO_FALLBACK=true
+      notify "Recorder audio" "No desktop audio device. Recording without audio."
+    fi
+    ;;
+  microphone)
+    if default_source_present; then
+      audio=("--audio=$(pactl get-default-source)")
+      ACTIVE_AUDIO_MODE=microphone
+    else
+      AUDIO_FALLBACK=true
+      notify "Recorder audio" "No microphone available. Recording without audio."
+    fi
+    ;;
+  esac
+
+  local dir
+  dir="$(recordings_dir)"
+  mkdir -p "$dir"
+  OUTPUT_PATH="$(next_recording_path "$dir" "$container")"
+  printf '%s\n' "$OUTPUT_PATH" >"$LAST_FILE" 2>/dev/null || true
+
+  local -a base=(wf-recorder -y -D -r "$fps" "${target[@]}" "${audio[@]}" -f "$OUTPUT_PATH")
+  # h264_v4l2m2m crashes FFmpeg on Iris at 1920x1200 and defaults to 200 kb/s:
+  # pad to multiples of 32 (1184 and 1216 encode fine) and pass the bitrate.
+  local -a hw=(-c h264_v4l2m2m -x nv12 -F 'pad=ceil(iw/32)*32:ceil(ih/32)*32' -p "b=${bitrate}k")
+  local -a sw=(-c libx264 -x yuv420p -F 'pad=ceil(iw/2)*2:ceil(ih/2)*2' -p preset=veryfast -p crf=23)
+
+  trap cleanup_session EXIT
+  local started=false _
+  if [[ $encoder != cpu ]] && v4l2_encoder_present; then
+    for _ in 1 2 3 4 5; do
+      if spawn_wf_recorder "${base[@]}" "${hw[@]}"; then
+        started=true
+        break
+      fi
+    done
+    $started || notify "Recording with the CPU" "The hardware video encoder did not start, so the CPU encodes."
+  fi
+  # The stuck-header check is for the V4L2 encoder only: libx264 can take longer
+  # than 3 s to flush its first bytes on a busy system, which is not a hang.
+  if ! $started; then
+    "${base[@]}" "${sw[@]}" 2>"$LOG_FILE" &
+    WF_PID=$!
+  fi
+  finish_capture "$WF_PID" || true
+  spawn_saved_hook "$OUTPUT_PATH"
+  ((DISCORD)) && maybe_compress_recording "$OUTPUT_PATH"
+}
+
 stop_recording() {
   local pid=""
   pid="$(cat "$PID_FILE" 2>/dev/null || true)"
@@ -589,7 +756,7 @@ stop_recording() {
   # give the recorder a grace period to flush and exit, then force it down so stop
   # always clears the capture.
   local _
-  for _ in $(seq 30); do recorder_running || break; sleep 0.1; done
+  for _ in $(seq 100); do recorder_running || break; sleep 0.1; done
   if recorder_running && [[ $pid =~ ^[0-9]+$ ]]; then
     kill -KILL "$pid" 2>/dev/null || true
   fi
@@ -598,6 +765,10 @@ stop_recording() {
 # ── pause/resume toggle the live capture through the IPC socket; gsr-cli's own
 # reply is relayed back to the shell by the daemon.
 set_paused() {
+  if wf_recorder_running; then
+    echo "err record: pause is not supported by the wf-recorder backend"
+    return 1
+  fi
   require_command gsr-cli gsr-cli
   gsr-cli -ipc "$GSR_SOCKET" set-paused "$1"
 }
@@ -606,8 +777,12 @@ set_paused() {
 # --version; the encoder label is the GPU vendor plus the first hardware video
 # codec GSR reports through --info. Any parse miss degrades to "GPU".
 info_recording() {
-  local version="" encoder="GPU"
-  if command -v gpu-screen-recorder >/dev/null 2>&1; then
+  local version="" encoder="GPU" backend=gsr
+  if ! gsr_usable && command -v wf-recorder >/dev/null 2>&1; then
+    backend=wf-recorder
+    version="$(wf-recorder --version 2>/dev/null | head -n1 | tr -d '\n' || true)"
+    if v4l2_encoder_present; then encoder="V4L2/h264_v4l2m2m"; else encoder="CPU/libx264"; fi
+  elif command -v gpu-screen-recorder >/dev/null 2>&1; then
     version="$(gpu-screen-recorder --version 2>/dev/null | head -n1 | tr -d '\n' || true)"
     local info vendor codec_line
     info="$(gpu-screen-recorder --info 2>/dev/null || true)"
@@ -624,7 +799,8 @@ info_recording() {
   quality="${RYOKU_RECORD_QUALITY:-$(cfg_get '.quality' very_high)}"
   codec="${RYOKU_RECORD_CODEC:-$(cfg_get '.codec' h264)}"
   fmode="${RYOKU_RECORD_FRAMERATE_MODE:-$(cfg_get '.framerateMode' cfr)}"
-  printf '{"backend":"gsr","version":"%s","encoder":"%s","fps":"%s","quality":"%s","codec":"%s","framerateMode":"%s"}\n' \
+  printf '{"backend":"%s","version":"%s","encoder":"%s","fps":"%s","quality":"%s","codec":"%s","framerateMode":"%s"}\n' \
+    "$backend" \
     "$(json_escape "$version")" \
     "$(json_escape "$encoder")" \
     "$(json_escape "$fps")" \
@@ -694,7 +870,7 @@ fi
 case "$ACTION" in
 start) start_recording ;;
 stop) stop_recording ;;
-status) recorder_running && echo recording || echo idle ;;
+status) if recorder_running; then echo recording; else echo idle; exit 1; fi ;;
 info) info_recording ;;
 pause) set_paused true ;;
 resume) set_paused false ;;

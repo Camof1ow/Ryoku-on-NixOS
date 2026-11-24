@@ -292,7 +292,8 @@ Singleton {
     }
 
     // ── reconcile against the live process. The status file says a capture runs;
-    // GSR's IPC status backs it up so a stale file (the backend killed outright)
+    // the recorder's own status check (GSR's IPC socket, or the wf-recorder
+    // fallback's pid) backs it up so a stale file (the backend killed outright)
     // can never strand the island. GSR brings its socket up a moment after launch,
     // so a negative answer inside the first seconds of a capture is the socket
     // warming up, not a stop; a launch that never produced a file clears once that
@@ -308,9 +309,7 @@ Singleton {
     Process {
         id: poll
         property bool launched: false
-        command: ["gsr-cli", "-ipc",
-            (Quickshell.env("XDG_RUNTIME_DIR") || "/tmp") + "/ryoku-gsr.sock",
-            "status"]
+        command: ["ryoku-cmd-record", "status"]
         onStarted: poll.launched = true
         onRunningChanged: {
             if (!running && !poll.launched && root.available) {

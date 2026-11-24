@@ -67,21 +67,12 @@ func (d *daemon) startRecord() {
 	})
 }
 
-// recorderRunning reports whether the Ryoku-started GSR capture is live, matching
-// the shell surfaces' own detection: gsr-cli answers on the IPC socket only for
-// the instance the recorder script launched.
+// recorderRunning reports whether the Ryoku-started capture is live, asking the
+// recorder script itself so the GSR socket check and the wf-recorder fallback's
+// pid check stay in one place: `ryoku-cmd-record status` exits 0 only while a
+// capture it launched runs.
 func recorderRunning() bool {
-	return exec.Command("gsr-cli", "-ipc", recordSocketPath(), "status").Run() == nil
-}
-
-// recordSocketPath is the single-recording GSR control socket, shared with the
-// backend script.
-func recordSocketPath() string {
-	dir := os.Getenv("XDG_RUNTIME_DIR")
-	if dir == "" {
-		dir = "/tmp"
-	}
-	return filepath.Join(dir, "ryoku-gsr.sock")
+	return exec.Command("ryoku-cmd-record", "status").Run() == nil
 }
 
 // runRecord invokes ryoku-cmd-record and returns its trimmed stdout, or "ok" for

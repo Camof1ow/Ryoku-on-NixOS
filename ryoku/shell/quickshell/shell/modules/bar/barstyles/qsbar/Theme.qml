@@ -2192,14 +2192,15 @@ Item {
         }
     }
 
-    // Detection rides GSR's IPC socket, the Ryoku-scoped liveness check: a foreign
-    // gpu-screen-recorder is invisible to it. When it is up, the recorder-status.json
-    // the backend writes carries the pid the elapsed clock probes.
+    // Detection asks the recorder script, the Ryoku-scoped liveness check: a
+    // foreign gpu-screen-recorder or wf-recorder is invisible to it. When it is up,
+    // the recorder-status.json the backend writes carries the pid the elapsed clock
+    // probes.
     Process {
         id: recordingPidProc
         command: ["sh", "-c",
-            "command -v gsr-cli >/dev/null 2>&1 || exit 127; "
-            + "gsr-cli -ipc \"${XDG_RUNTIME_DIR:-/tmp}/ryoku-gsr.sock\" status >/dev/null 2>&1 || exit 1; "
+            "command -v ryoku-cmd-record >/dev/null 2>&1 || exit 127; "
+            + "ryoku-cmd-record status >/dev/null 2>&1 || exit 1; "
             + "cat \"${RYOKU_STATE_PATH:-$HOME/.local/state/ryoku}/recorder-status.json\" 2>/dev/null"]
         running: false
         onExited: (exitCode) => {

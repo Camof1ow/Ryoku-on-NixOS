@@ -250,17 +250,16 @@ Singleton {
         }
     }
 
-    // GSR's IPC socket backs the status file up (a backend killed outright leaves
-    // a stale file). The socket comes up a moment after launch, so a negative
+    // The recorder's own status check (GSR's IPC socket, or the wf-recorder
+    // fallback's pid) backs the status file up (a backend killed outright leaves
+    // a stale file). GSR's socket comes up a moment after launch, so a negative
     // answer inside the first seconds of a capture is the socket warming up.
     readonly property int socketWarmupMs: 5000
     Process {
         id: checkProcess
         command: ["/bin/sh", "-c",
-            "command -v gsr-cli >/dev/null 2>&1 || exit 127; "
-            + "exec gsr-cli -ipc \"$1\" status",
-            "ryoku-gsr-status",
-            (Quickshell.env("XDG_RUNTIME_DIR") || "/tmp") + "/ryoku-gsr.sock"]
+            "command -v ryoku-cmd-record >/dev/null 2>&1 || exit 127; "
+            + "exec ryoku-cmd-record status >/dev/null"]
         onExited: (exitCode, exitStatus) => {
             if (exitCode === 127) {
                 root.available = false
