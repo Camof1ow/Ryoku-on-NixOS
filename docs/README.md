@@ -51,6 +51,8 @@ NixOS. When that matters, the NixOS implementation lives under `nix/`.
   package reporting and development entry points
 - [`structure.md`](structure.md): the NixOS port's repository layout
 - [`maintenance.md`](maintenance.md): port ownership, upstream sync and validation
+- [`zenbook-a14-firmware.md`](zenbook-a14-firmware.md): Zenbook A14 firmware,
+  DSP channel and driver map with known boot errors
 
 The public Nix entry point is the repository root `flake.nix`.
 
