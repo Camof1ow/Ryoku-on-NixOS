@@ -122,13 +122,37 @@ DSP 펌웨어는 켜지자마자 pd-mapper에 자기 PD와 서비스를 알리�
 | 파일 | 내용 | 되돌리기 |
 |---|---|---|
 | `configuration.nix` | `boot.initrd.extraFirmwarePaths`에 GPU 펌웨어 2개 추가 | 백업 `configuration.nix.bak-errfix` |
-| `modules/iris-test.nix` | 장치 트리에서 iris 켜기, `qcvss8380.mbn` 지정 | imports에서 줄 삭제 |
-| `modules/iris-irq-fix.nix` + `patches/iris-irq-sync/` | `qcom_iris` 종료 데드락 수정(Qualcomm v3 시리즈를 7.2.8에 맞춰 옮김), 커널 직접 빌드 | imports에서 줄 삭제 후 `nixos-rebuild boot`(배포판 커널로 돌아감) |
-| `modules/iris-encoder.nix` | 부팅 때 `qcom_iris` 로드, `power/control=on`, 펌웨어 미리 깨우기 | 백업 `configuration.nix.bak-irisenc` |
-| `modules/x1e-cluster-idle.nix` | `cluster_cl5` 유휴 상태 제거(강제 리셋 완화) | imports에서 줄 삭제 |
+| `modules/iris-test.nix` | 장치 트리에서 iris 켜기, `qcvss8380.mbn` 지정. 7절 옵션에 들어갔다 | 옵션을 켤 때 imports에서 삭제 |
+| `modules/iris-irq-fix.nix` + `patches/iris-irq-sync/` | `qcom_iris` 종료 데드락 수정(Qualcomm v3 시리즈를 7.2.8에 맞춰 옮김), 커널 직접 빌드. 7절 옵션에 들어갔다 | 옵션을 켤 때 imports에서 삭제(커널 빌드 결과는 같다) |
+| `modules/iris-encoder.nix` | 부팅 때 `qcom_iris` 로드, `power/control=on`, 펌웨어 미리 깨우기. 7절 옵션에 들어갔다 | 옵션을 켤 때 imports에서 삭제 |
+| `modules/x1e-cluster-idle.nix` | `cluster_cl5` 유휴 상태 제거(강제 리셋 완화). 이 저장소 하드웨어 모듈에도 같은 오버레이가 있다 | imports에서 삭제해도 된다(같은 값이 두 번 걸려 있음) |
 | `modules/dsp-early.nix` | initrd에서 `qcom_pd_mapper`·`qrtr_smd`를 DSP보다 먼저 로드 | 백업 `configuration.nix.bak-dspearly` |
 | `modules/sddm-sw-cursor.nix` + `patches/weston-pointer-at-start.patch` | 로그인 화면 커서(5절). 이 저장소 모듈에 같은 내용이 들어갔다 | flake.lock의 ryoku를 그 커밋 이후로 올릴 때 imports에서 함께 삭제. 남기면 패치가 두 번 걸려 weston 빌드가 실패한다(`Reversed (or previously applied) patch detected!`) |
-| `modules/chromium-hwdec.nix` | Chromium 래퍼에 `--use-angle=gles-egl --enable-features=WaylandWindowDecorations,AcceleratedVideoDecoder`. H.264·HEVC·VP9를 iris(V4L2)로 디코딩한다. AV1은 nixpkgs 빌드에 `use_av1_hw_decoder`가 없어 CPU로 남는다([nixpkgs#537726](https://github.com/NixOS/nixpkgs/pull/537726)) | 백업 `configuration.nix.bak-chromiumhw` |
+| `modules/chromium-hwdec.nix` | Chromium 래퍼에 `--use-angle=gles-egl --enable-features=WaylandWindowDecorations,AcceleratedVideoDecoder`. H.264·HEVC·VP9를 iris(V4L2)로 디코딩한다. 7절 옵션에는 AV1(`use_av1_hw_decoder`)과 8K 패치까지 들어갔다 | 옵션을 켤 때 imports에서 삭제 |
+
+## 7. iris 영상 코덱 옵션 (`hardware.asus-zenbook-a14.iris.enable`)
+
+기본은 꺼져 있다. 켜면 `nix/hardware/asus-zenbook-a14-iris.nix`가 다음을 넣는다. 6절의 iris 관련 로컬 파일 네 개와 커널·Chromium 빌드 결과가 같다(평가로 비교).
+
+- 장치 트리에서 iris 노드를 켜고 `qcvss8380.mbn`을 가리킨다. 펌웨어 파일은 호스트가 `/etc/nixos/firmware/qcom/x1e80100/ASUSTeK/zenbook-a14/`에 둔다(ASUS BSP `V1.312.8100.0`).
+- 종료 데드락 수정 커널 패치 3개(`nix/patches/iris-irq-sync/`). 커널을 직접 빌드한다(이 기기에서 29분).
+- 부팅 때 `qcom_iris`를 올리고(블랙리스트는 그대로 두고 이름을 지정한 modprobe), 런타임 PM을 끄고, 인코더를 미리 깨운다.
+- Chromium: 실행 플래그 `--use-angle=gles-egl --enable-features=WaylandWindowDecorations,AcceleratedVideoDecoder`, GN `use_av1_hw_decoder = true`, `nix/patches/chromium-v4l2-coded-size.patch`. Chromium을 소스에서 빌드한다(이 기기에서 5시간 11분, nixpkgs를 올릴 때마다 다시).
+
+기본으로 켜지 않는 이유: 켜면 새 설치와 CI가 Chromium을 소스에서 빌드해야 하고(CI 러너 6시간 제한), 펌웨어도 호스트가 따로 둬야 한다.
+
+| 실측(2026-11-24~25) | 결과 |
+|---|---|
+| 1080p H.264·VP9 | 렌더러 CPU 31~36% → 3%, iris 인터럽트 3초에 160회 이상 |
+| AV1 1080p·4K | `V4L2VideoDecoder`, dav1d 스레드 0 |
+| AV1 8K(96Mbps, 30fps, 15초) | 7.49초에 영상 7.49초 진행(실시간), 초당 30.0프레임, 끊김 0, 브라우저 CPU 26%(dav1d로 디코딩할 때 렌더러 약 600%) |
+
+8K가 패치 없이 안 되던 이유: iris는 4K를 넘는 영상에 bitstream 버퍼 12.75MiB 이상을 요구하고(4K 이하는 6.75MiB, `v4l2-ctl`로 확인), 작은 버퍼는 `iris_vb2_buf_prepare`에서 EINVAL로 거부한다. Chromium은 OUTPUT 형식을 0×0으로 정해 6.75MiB 버퍼를 한 번만 잡으므로 8K 첫 QBUF가 거부되고(`Error while queuing input`) dav1d로 넘어갔다. 패치는 형식을 정할 때 실제 해상도를 넘긴다. 커널 master와 Chromium main도 같은 코드다.
+
+알려진 문제:
+
+- iris를 처음 켤 때 펌웨어가 `system error of type 0x5000003`을 한 번 내고 바로 복구된다.
+- Chromium 빌드 중 node(tsc)가 결과를 다 쓴 뒤 종료 과정에서 멈춘 적이 있다(스레드 셋 모두 futex 대기, 2시간 39분). root로 `gdb -p <pid> -batch -ex 'call (void)_exit(0)'`를 하면 그 단계가 성공으로 처리되고 빌드가 이어진다.
 
 ## 확인 명령
 

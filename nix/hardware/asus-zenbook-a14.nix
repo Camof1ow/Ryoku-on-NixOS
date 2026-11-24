@@ -4,6 +4,8 @@
 { lib, pkgs, ... }:
 
 {
+  imports = [ ./asus-zenbook-a14-iris.nix ];
+
   hardware.deviceTree = {
     enable = true;
     name = "qcom/x1e80100-asus-zenbook-a14.dtb";

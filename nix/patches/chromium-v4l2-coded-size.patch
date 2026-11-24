@@ -1,0 +1,14 @@
+--- a/media/gpu/v4l2/v4l2_stateful_video_decoder.cc	2026-11-25 00:24:24.435607728 +0900
++++ b/media/gpu/v4l2/v4l2_stateful_video_decoder.cc	2026-11-25 00:24:43.443738870 +0900
+@@ -392,8 +392,10 @@
+   constexpr int kFullHDNumPixels = 1920 * 1080;
+   const size_t kInputBufferInMBs =
+       (config.coded_size().GetArea() <= kFullHDNumPixels) ? 2 : 4;
++  // Pass the coded size: drivers that size bitstream buffers by resolution
++  // (Qualcomm iris wants 12.75 MiB above 4K) reject smaller ones on QBUF.
+   const auto v4l2_format = OUTPUT_queue_->SetFormat(
+-      profile_as_v4l2_fourcc, gfx::Size(), kInputBufferInMBs * kMiB);
++      profile_as_v4l2_fourcc, config.coded_size(), kInputBufferInMBs * kMiB);
+   if (!v4l2_format) {
+     std::move(init_cb).Run(DecoderStatus::Codes::kFailedToCreateDecoder);
+     return;
