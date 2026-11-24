@@ -1728,7 +1728,28 @@ in
         pkgs.qt6.qtmultimedia
         pkgs.qt6.qtsvg
       ];
+
+      # NixOS has no /usr/share/icons, so without an explicit path the
+      # greeter's libwayland-cursor cannot find the theme and draws its
+      # built-in fallback image.
+      settings.General.GreeterEnvironment = lib.mkIf
+        (config.services.displayManager.sddm.enable &&
+         config.services.displayManager.sddm.wayland.enable)
+        (lib.mkDefault "XCURSOR_PATH=/run/current-system/sw/share/icons,XCURSOR_THEME=Bibata-Modern-Ice,XCURSOR_SIZE=24");
     };
+
+    # Weston 16 (NixOS' default SDDM Wayland compositor) advertises wl_pointer
+    # only on the first touchpad event. The Qt greeter binds wl_seat at boot and
+    # never sets a cursor image on a pointer that appears later, so the login
+    # screen showed no cursor. The SDDM module calls pkgs.weston directly, hence
+    # an overlay; weston is only built when something uses it.
+    nixpkgs.overlays = [
+      (final: prev: {
+        weston = prev.weston.overrideAttrs (old: {
+          patches = (old.patches or [ ]) ++ [ ../patches/weston-pointer-at-start.patch ];
+        });
+      })
+    ];
 
     # SDDM 0.21 can treat a crashed Wayland greeter as a successful login and
     # leave the machine on an empty VT. The upstream guard waits until SDDM has

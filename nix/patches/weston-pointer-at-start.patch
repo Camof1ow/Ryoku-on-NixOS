@@ -1,0 +1,19 @@
+diff --git a/libweston/libinput-device.c b/libweston/libinput-device.c
+index 42505ce..fe0f3eb 100644
+--- a/libweston/libinput-device.c
++++ b/libweston/libinput-device.c
+@@ -1089,6 +1089,14 @@ evdev_device_create(struct libinput_device *libinput_device,
+ 	libinput_device_set_user_data(libinput_device, device);
+ 	libinput_device_ref(libinput_device);
+ 
++	/* Advertise the pointer as soon as a pure pointing device (touchpad,
++	 * mouse) appears instead of on its first event: Qt clients that bind
++	 * wl_seat before the pointer exists never set a cursor image on the
++	 * wl_pointer they get later, so the SDDM greeter showed no cursor. */
++	if (!libinput_device_has_capability(libinput_device,
++					    LIBINPUT_DEVICE_CAP_KEYBOARD))
++		ensure_pointer_capability(libinput_device);
++
+ 	return device;
+ }
+ 

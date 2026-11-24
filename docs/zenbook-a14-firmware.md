@@ -103,11 +103,11 @@ DSP 펌웨어는 켜지자마자 pd-mapper에 자기 PD와 서비스를 알리�
 | 패치 전 | 키보드만(2) → 나중에 3 | 0회 | 안 보임 |
 | 장치 인식 때 포인터를 만드는 패치 | 키보드+포인터(3) | 17~39회 | 보임 |
 
-수정(이 기기 `/etc/nixos/modules/sddm-sw-cursor.nix`):
+수정: 이 저장소 NixOS 모듈(`nix/modules/ryoku.nix`의 SDDM 블록)과 `nix/patches/weston-pointer-at-start.patch`. 처음에는 이 기기 `/etc/nixos/modules/sddm-sw-cursor.nix`로 시험했고, 저장소 모듈만 쓴 평가 결과(weston drv, compositor 명령, SDDM 설정)가 그것과 같다.
 
 - weston 패치 `weston-pointer-at-start.patch`: `evdev_device_create`에서 키보드가 아닌 포인터 장치(터치패드·마우스)는 바로 `ensure_pointer_capability`를 부른다.
-- `services.displayManager.sddm.settings.General.GreeterEnvironment`에 `XCURSOR_PATH=/run/current-system/sw/share/icons`, `XCURSOR_THEME`, `XCURSOR_SIZE`. libwayland-cursor 기본 경로(`/usr/share/icons` 등)에는 NixOS 커서 테마가 없다. niri 안 창 시험에서 이 경로 없이는 테마를 못 찾아 기본 그림(10×16)이 쓰였다.
-- 이 기기에서 weston을 쓰는 것은 SDDM 설정뿐이라(`nix why-depends`) weston 전체에 overlay로 패치를 건다.
+- `services.displayManager.sddm.settings.General.GreeterEnvironment`에 `XCURSOR_PATH=/run/current-system/sw/share/icons`, `XCURSOR_THEME`, `XCURSOR_SIZE`. libwayland-cursor 기본 경로(`/usr/share/icons` 등)에는 NixOS 커서 테마가 없다. niri 안 창 시험에서 이 경로 없이는 테마를 못 찾아 기본 그림(10×16)이 쓰였다. 값은 `lib.mkDefault`라 호스트 설정이 이긴다.
+- NixOS SDDM 모듈이 `pkgs.weston`을 직접 부르므로 overlay로 weston 전체에 패치를 건다. weston을 쓰는 것이 없으면 빌드되지 않는다. 이 기기에서 weston을 쓰는 것은 SDDM뿐이다(`nix why-depends`).
 
 버린 가설(실측으로 반증):
 
@@ -115,7 +115,7 @@ DSP 펌웨어는 켜지자마자 pd-mapper에 자기 PD와 서비스를 알리�
 - **직접 출력(client buffer scanout)**: `WESTON_FORCE_RENDERER=1` 없이도 보였다. 처음 시험에서 이 값을 켠 회차만 보였던 것은 그때 이미 터치패드를 만지고 있어 포인터가 먼저 생겼기 때문으로 본다(추정).
 - **계정·환경변수**: `sddm` 계정·`/var/lib/sddm` 홈·세션 버스·`XDG_DATA_DIRS` 유무로는 결과가 바뀌지 않았다.
 
-참고: [sddm#1996](https://github.com/sddm/sddm/issues/1996)에 "ryoku arch with weston"에서도 같은 증상이라는 보고가 있다(2026-09-12). 이 저장소의 NixOS 모듈에는 아직 반영하지 않았다.
+참고: [sddm#1996](https://github.com/sddm/sddm/issues/1996)에 "ryoku arch with weston"에서도 같은 증상이라는 보고가 있다(2026-09-12).
 
 ## 6. 이 기기에서 바꾼 것 (`/etc/nixos`)
 
@@ -127,7 +127,8 @@ DSP 펌웨어는 켜지자마자 pd-mapper에 자기 PD와 서비스를 알리�
 | `modules/iris-encoder.nix` | 부팅 때 `qcom_iris` 로드, `power/control=on`, 펌웨어 미리 깨우기 | 백업 `configuration.nix.bak-irisenc` |
 | `modules/x1e-cluster-idle.nix` | `cluster_cl5` 유휴 상태 제거(강제 리셋 완화) | imports에서 줄 삭제 |
 | `modules/dsp-early.nix` | initrd에서 `qcom_pd_mapper`·`qrtr_smd`를 DSP보다 먼저 로드 | 백업 `configuration.nix.bak-dspearly` |
-| `modules/sddm-sw-cursor.nix` + `patches/weston-pointer-at-start.patch` | 로그인 화면 커서(5절): weston 포인터 미리 생성 패치, greeter 커서 테마 경로 | imports에서 줄 삭제 후 `nixos-rebuild boot` |
+| `modules/sddm-sw-cursor.nix` + `patches/weston-pointer-at-start.patch` | 로그인 화면 커서(5절). 이 저장소 모듈에 같은 내용이 들어갔다 | flake.lock의 ryoku를 그 커밋 이후로 올릴 때 imports에서 함께 삭제. 남기면 패치가 두 번 걸려 weston 빌드가 실패한다(`Reversed (or previously applied) patch detected!`) |
+| `modules/chromium-hwdec.nix` | Chromium 래퍼에 `--use-angle=gles-egl --enable-features=WaylandWindowDecorations,AcceleratedVideoDecoder`. H.264·HEVC·VP9를 iris(V4L2)로 디코딩한다. AV1은 nixpkgs 빌드에 `use_av1_hw_decoder`가 없어 CPU로 남는다([nixpkgs#537726](https://github.com/NixOS/nixpkgs/pull/537726)) | 백업 `configuration.nix.bak-chromiumhw` |
 
 ## 확인 명령
 
