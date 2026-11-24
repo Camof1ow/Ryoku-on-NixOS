@@ -1,6 +1,6 @@
 # Zenbook A14 (UX3407RA, X1E80100) 펌웨어·모듈 맵
 
-2026-11-24 기준 Zenbook A14 UX3407RA 한 대(NixOS, 커널 7.2.8 + iris IRQ 패치)에서 실측한 기록이다. 5절은 그 기기의 `/etc/nixos`에서 시험한 로컬 설정이고, 이 저장소의 Zenbook 모듈에는 `cluster_cl5` 완화만 들어 있다. 확인 명령은 맨 아래에 있다.
+2026-11-24 기준 Zenbook A14 UX3407RA 한 대(NixOS, 커널 7.2.8 + iris IRQ 패치)에서 실측한 기록이다. 6절은 그 기기의 `/etc/nixos`에서 시험한 로컬 설정이고, 이 저장소의 Zenbook 모듈에는 `cluster_cl5` 완화만 들어 있다. 확인 명령은 맨 아래에 있다.
 
 ## 1. 펌웨어 → 장치 → 드라이버
 
@@ -90,7 +90,34 @@ DSP 펌웨어는 켜지자마자 pd-mapper에 자기 PD와 서비스를 알리�
 - **cDSP 에러(`-12`, subsystem)는 적용 후 0/5다.** 하지만 적용 직전 세대 11·12에서도 0/3이라, `dsp-early.nix` 덕분이라고 말할 수 없다. 원인 가설(DSP가 pd-mapper·QRTR보다 먼저 켜짐)은 확인되지 않았다. 부팅 뒤 cDSP를 다시 켜면 6/6 정상(채널 연결까지 약 4ms)이라 부팅 때만 생기는 조건인 것은 맞다.
 - `dsp-early.nix`는 해가 없고 순서도 맞으니 유지한다. 다시 나는지는 아래 확인 명령의 "부팅별 DSP 타임아웃 수"로 본다.
 
-## 5. 이 기기에서 바꾼 것 (`/etc/nixos`)
+## 5. 로그인 화면(SDDM) 커서
+
+증상: 부팅 직후 로그인 화면(SDDM greeter, Material You·Orbital 스킨)에서 터치패드를 움직이면 버튼 hover는 되는데 커서가 보이지 않는다. 로그인 뒤 niri에서는 보인다.
+
+로그인 화면은 niri가 아니라 `weston --shell=kiosk`(SDDM Wayland greeter, NixOS 기본)가 그린다. weston 16에는 cursor-shape 프로토콜이 없어 greeter(Qt)가 커서 그림을 직접 붙인다(`wl_pointer.set_cursor`).
+
+원인: weston 16은 포인터를 터치패드의 **첫 이벤트 때** 만든다(`libweston/libinput-device.c`의 `ensure_pointer_capability`). 부팅 직후 greeter는 키보드만 있는 seat(`wl_seat.capabilities(2)`)에 붙고, 나중에 생긴 `wl_pointer`로 입력(hover)은 받지만 `set_cursor`를 한 번도 부르지 않는다. 그래서 커서 그림이 없다.
+
+| VT 9 실측(실제 화면 출력 weston + greeter 테스트 모드, 시작할 때 터치패드 안 만짐) | 처음 받은 seat | `set_cursor` | 커서 |
+|---|---|---|---|
+| 패치 전 | 키보드만(2) → 나중에 3 | 0회 | 안 보임 |
+| 장치 인식 때 포인터를 만드는 패치 | 키보드+포인터(3) | 17~39회 | 보임 |
+
+수정(이 기기 `/etc/nixos/modules/sddm-sw-cursor.nix`):
+
+- weston 패치 `weston-pointer-at-start.patch`: `evdev_device_create`에서 키보드가 아닌 포인터 장치(터치패드·마우스)는 바로 `ensure_pointer_capability`를 부른다.
+- `services.displayManager.sddm.settings.General.GreeterEnvironment`에 `XCURSOR_PATH=/run/current-system/sw/share/icons`, `XCURSOR_THEME`, `XCURSOR_SIZE`. libwayland-cursor 기본 경로(`/usr/share/icons` 등)에는 NixOS 커서 테마가 없다. niri 안 창 시험에서 이 경로 없이는 테마를 못 찾아 기본 그림(10×16)이 쓰였다.
+- 이 기기에서 weston을 쓰는 것은 SDDM 설정뿐이라(`nix why-depends`) weston 전체에 overlay로 패치를 건다.
+
+버린 가설(실측으로 반증):
+
+- **하드웨어 커서 플레인**: niri는 msm DPU 커서 플레인에서 커서가 안 보여 `disable-cursor-plane`을 쓰지만, weston은 커서 플레인을 끄지 않은 빌드로도 커서가 보였다.
+- **직접 출력(client buffer scanout)**: `WESTON_FORCE_RENDERER=1` 없이도 보였다. 처음 시험에서 이 값을 켠 회차만 보였던 것은 그때 이미 터치패드를 만지고 있어 포인터가 먼저 생겼기 때문으로 본다(추정).
+- **계정·환경변수**: `sddm` 계정·`/var/lib/sddm` 홈·세션 버스·`XDG_DATA_DIRS` 유무로는 결과가 바뀌지 않았다.
+
+참고: [sddm#1996](https://github.com/sddm/sddm/issues/1996)에 "ryoku arch with weston"에서도 같은 증상이라는 보고가 있다(2026-09-12). 이 저장소의 NixOS 모듈에는 아직 반영하지 않았다.
+
+## 6. 이 기기에서 바꾼 것 (`/etc/nixos`)
 
 | 파일 | 내용 | 되돌리기 |
 |---|---|---|
@@ -100,6 +127,7 @@ DSP 펌웨어는 켜지자마자 pd-mapper에 자기 PD와 서비스를 알리�
 | `modules/iris-encoder.nix` | 부팅 때 `qcom_iris` 로드, `power/control=on`, 펌웨어 미리 깨우기 | 백업 `configuration.nix.bak-irisenc` |
 | `modules/x1e-cluster-idle.nix` | `cluster_cl5` 유휴 상태 제거(강제 리셋 완화) | imports에서 줄 삭제 |
 | `modules/dsp-early.nix` | initrd에서 `qcom_pd_mapper`·`qrtr_smd`를 DSP보다 먼저 로드 | 백업 `configuration.nix.bak-dspearly` |
+| `modules/sddm-sw-cursor.nix` + `patches/weston-pointer-at-start.patch` | 로그인 화면 커서(5절): weston 포인터 미리 생성 패치, greeter 커서 테마 경로 | imports에서 줄 삭제 후 `nixos-rebuild boot` |
 
 ## 확인 명령
 
