@@ -43,12 +43,14 @@ jobs:
             extra-trusted-public-keys = ryotunes.cachix.org-1:QNocajCsVm/IAMb8LPOWJi72XwqiexW9ec0UqeXLpGs=
 
       # 빌드 로그 전체(-L)는 Actions 화면이 브라우저 메모리를 다 쓰므로 실패한 빌드의 마지막 200줄만 남긴다.
+      # ryoku-iso는 설치된 시스템이 unstable-dev 브랜치를 따라가는데 이 포크에는 그 브랜치가 없다.
+      # 그래서 main을 따라가는 ryoku-iso-stable을 빌드한다(Zenbook ISO도 main).
       - name: Build ISO
         shell: bash
         run: |
           set -euo pipefail
           nix build --print-out-paths --option log-lines 200 -o result-iso \
-            .#packages.x86_64-linux.ryoku-iso
+            .#packages.x86_64-linux.ryoku-iso-stable
           ls -la result-iso/iso
           sha256sum result-iso/iso/*.iso | tee result-iso.sha256
           df -h /
