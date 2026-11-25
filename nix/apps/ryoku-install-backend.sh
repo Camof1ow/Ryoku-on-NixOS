@@ -215,18 +215,18 @@ zenbook_partitions_to_replace() {
 # 숫자가 아니거나 디스크에 없는 번호가 있으면 실패하므로, 부르는 쪽은 디스크를 건드리기 전에 멈춘다.
 requested_partitions_to_replace() {
   local number present
-  local -a numbers=() seen=()
+  local -a numbers=() picked=()
   present="$(lsblk -J -o PARTN,TYPE "$1" | jq -r '.. | objects | select(.type == "part") | .partn')"
   IFS=', ' read -r -a numbers <<< "${RYOKU_INSTALL_REPLACE_PARTITIONS:-}"
   for number in "${numbers[@]}"; do
     [ -n "$number" ] || continue
     [[ "$number" =~ ^[1-9][0-9]*$ ]] || die "RYOKU_INSTALL_REPLACE_PARTITIONS: '$number' is not a partition number"
     grep -qx "$number" <<< "$present" || die "RYOKU_INSTALL_REPLACE_PARTITIONS: $1 has no partition $number"
-    [[ " ${seen[*]} " == *" $number "* ]] && continue
-    seen+=("$number")
+    [[ " ${picked[*]} " == *" $number "* ]] && continue
+    picked+=("$number")
     printf '%s\n' "$number"
   done
-  [ "${#seen[@]}" -gt 0 ] || die "RYOKU_INSTALL_REPLACE_PARTITIONS lists no partition"
+  [ "${#picked[@]}" -gt 0 ] || die "RYOKU_INSTALL_REPLACE_PARTITIONS lists no partition"
 }
 
 # The live ISO exposes its embedded Ryoku tree through /etc/ryoku/source, which
