@@ -42,11 +42,14 @@ in
     # 7.2.8의 iris_vpu_power_off()는 core->lock을 쥔 채 disable_irq()로 스레드 IRQ를 기다리고, 그 IRQ는
     # core->lock을 기다려 종료가 멈춘다. Qualcomm "media: qcom: iris: Fix IRQ synchronization during power-off"
     # v3(2026-11-20)를 7.2.8 문맥에 맞춰 옮겼다. 커널이 이 시리즈를 포함하면 뺀다.
+    # iris-8k-max-clock: iris는 입력 버퍼가 들어오는 속도로 fps를 추정해 클럭을 정하므로, 디코딩이 밀리면 클럭도
+    # 같이 내려간다(8K60 AV1 재생 중 192~240MHz). 4K를 넘으면 최대 OPP(481MHz)를 쓴다. 그래도 8K60은 초당 58.5프레임만
+    # 디코딩해 22%를 버린다(X Elite 디코딩 사양은 4K120까지). 4K60은 이 패치와 상관없이 192MHz에서 버림 0.1%다.
     boot.kernelPatches = map kernelPatch [
       "0001-Revert-media-qcom-iris-use-disable_irq-during-power-"
       "0002-media-qcom-iris-Fix-IRQ-disable-depth-imbalance-on-w"
       "0003-media-qcom-iris-Skip-register-access-in-IRQ-handler-"
-    ];
+    ] ++ [ { name = "iris-8k-max-clock"; patch = ../patches/iris-8k-max-clock.patch; } ];
 
     # 런타임 PM auto에서는 다시 켤 때 펌웨어가 0x5000003으로 죽어 압축 세션 시작이 13/20만 성공했고,
     # on에서는 44/44 성공했다. 유휴 전력 차이는 측정되지 않았다.

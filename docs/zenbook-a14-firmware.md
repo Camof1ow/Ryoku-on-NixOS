@@ -135,7 +135,8 @@ DSP 펌웨어는 켜지자마자 pd-mapper에 자기 PD와 서비스를 알리�
 기본은 꺼져 있다. 켜면 `nix/hardware/asus-zenbook-a14-iris.nix`가 다음을 넣는다. 6절의 iris 관련 로컬 파일 네 개와 커널·Chromium 빌드 결과가 같다(평가로 비교).
 
 - 장치 트리에서 iris 노드를 켜고 `qcvss8380.mbn`을 가리킨다. 펌웨어 파일은 호스트가 `/etc/nixos/firmware/qcom/x1e80100/ASUSTeK/zenbook-a14/`에 둔다(ASUS BSP `V1.312.8100.0`).
-- 종료 데드락 수정 커널 패치 3개(`nix/patches/iris-irq-sync/`). 커널을 직접 빌드한다(이 기기에서 29분).
+- 종료 데드락 수정 커널 패치 3개(`nix/patches/iris-irq-sync/`)와 8K 클럭 패치(`nix/patches/iris-8k-max-clock.patch`). 커널을 직접 빌드한다(이 기기에서 29분).
+  - iris는 1초 동안 들어온 입력 버퍼 수로 fps를 추정해 클럭을 정한다. 디코딩이 밀리면 입력도 느려져 클럭이 같이 내려가므로(8K60 재생 중 192~240MHz), 클럭 패치는 4K를 넘는 영상에 최대 OPP(481MHz)를 쓰게 한다.
 - 부팅 때 `qcom_iris`를 올리고(블랙리스트는 그대로 두고 이름을 지정한 modprobe), 런타임 PM을 끄고, 인코더를 미리 깨운다.
 - Chromium: 실행 플래그 `--use-angle=gles-egl --enable-features=WaylandWindowDecorations,AcceleratedVideoDecoder`, GN `use_av1_hw_decoder = true`, `nix/patches/chromium-v4l2-coded-size.patch`. Chromium을 소스에서 빌드한다(이 기기에서 5시간 11분, nixpkgs를 올릴 때마다 다시).
 
@@ -146,8 +147,12 @@ DSP 펌웨어는 켜지자마자 pd-mapper에 자기 PD와 서비스를 알리�
 | 1080p H.264·VP9 | 렌더러 CPU 31~36% → 3%, iris 인터럽트 3초에 160회 이상 |
 | AV1 1080p·4K | `V4L2VideoDecoder`, dav1d 스레드 0 |
 | AV1 8K(96Mbps, 30fps, 15초) | 7.49초에 영상 7.49초 진행(실시간), 초당 30.0프레임, 끊김 0, 브라우저 CPU 26%(dav1d로 디코딩할 때 렌더러 약 600%) |
+| YouTube AV1 8K60(7680×4050, itag 571) | 클럭 패치 전 iris 192~240MHz, 26% 버림(YouTube 통계). 패치 뒤 481MHz, 초당 58.5프레임 디코딩, 22% 버림 |
+| YouTube AV1 4K60(3840×2026, itag 401) | iris 192MHz, 초당 60.0프레임, 버림 0.1% |
 
 8K가 패치 없이 안 되던 이유: iris는 4K를 넘는 영상에 bitstream 버퍼 12.75MiB 이상을 요구하고(4K 이하는 6.75MiB, `v4l2-ctl`로 확인), 작은 버퍼는 `iris_vb2_buf_prepare`에서 EINVAL로 거부한다. Chromium은 OUTPUT 형식을 0×0으로 정해 6.75MiB 버퍼를 한 번만 잡으므로 8K 첫 QBUF가 거부되고(`Error while queuing input`) dav1d로 넘어갔다. 패치는 형식을 정할 때 실제 해상도를 넘긴다. 커널 master와 Chromium main도 같은 코드다.
+
+8K60은 하드웨어 한계다. Qualcomm X Elite 제품 사양서의 VPU 디코딩 최대치는 4K120이고, 8K60(7680×4050)은 픽셀 처리량이 그 1.9배다. 최대 클럭에서도 초당 58.5프레임에 그쳐 프레임이 늦게 나오고 버려진다. 1920×1200 화면에서는 4K60을 쓴다.
 
 알려진 문제:
 

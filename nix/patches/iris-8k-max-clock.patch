@@ -1,0 +1,17 @@
+--- a/drivers/media/platform/qcom/iris/iris_vpu_common.c
++++ b/drivers/media/platform/qcom/iris/iris_vpu_common.c
+@@ -433,6 +433,14 @@
+ 	height = max(inp_f->fmt.pix_mp.height, inst->crop.height);
+ 
+ 	mbpf = NUM_MBS_PER_FRAME(height, width);
++	/*
++	 * fps comes from the input queue rate, which follows the decode rate, so
++	 * a decoder that falls behind keeps lowering its own clock: 8K60 AV1 ran at
++	 * 192-240 MHz with a quarter of the frames dropped on X1E80100. Above 4K,
++	 * ask for the highest OPP instead.
++	 */
++	if (mbpf > NUM_MBS_PER_FRAME(2304, 4096))
++		fps = MAXIMUM_FPS;
+ 	mbs_per_second = mbpf * fps;
+ 
+ 	fw_cycles = fps * caps->mb_cycles_fw;
