@@ -62,6 +62,7 @@ jobs:
             .#checks.x86_64-linux.ryoku-installer-options \
             .#checks.x86_64-linux.ryoku-installer-transaction \
             .#checks.x86_64-linux.ryoku-installer-disk-identity \
+            .#checks.x86_64-linux.ryoku-installer-zenbook-partitions \
             .#checks.x86_64-linux.ryoku-installer-iso \
             .#checks.x86_64-linux.ryoku-installer-wrapper \
             .#checks.x86_64-linux.ryoku-session-bootstrap \

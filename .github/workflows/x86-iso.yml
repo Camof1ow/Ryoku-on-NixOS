@@ -1,0 +1,65 @@
+# 사무실 PC 같은 x86_64 기기에 설치할 Ryoku ISO를 손으로 실행해 빌드한다.
+# 아티팩트는 7일 뒤 지워지므로 설치 직전에 돌린다.
+name: Ryoku ISO (x86_64)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: x86-iso-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  iso:
+    name: Build x86_64 installer ISO
+    runs-on: ubuntu-24.04
+    timeout-minutes: 360
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Free disk space
+        shell: bash
+        run: |
+          df -h / /mnt 2>/dev/null || df -h /
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache \
+            /usr/local/share/boost /usr/share/swift /usr/local/.ghcup || true
+          sudo docker image prune --all --force >/dev/null 2>&1 || true
+          df -h /
+
+      # 설치기가 쓰는 Ryoku 업스트림 캐시에서 받는다.
+      - name: Install Nix
+        uses: DeterminateSystems/nix-installer-action@v23
+        with:
+          determinate: false
+          extra-conf: |
+            max-jobs = auto
+            cores = 0
+            extra-substituters = https://ryotunes.cachix.org
+            extra-trusted-public-keys = ryotunes.cachix.org-1:QNocajCsVm/IAMb8LPOWJi72XwqiexW9ec0UqeXLpGs=
+
+      # 빌드 로그 전체(-L)는 Actions 화면이 브라우저 메모리를 다 쓰므로 실패한 빌드의 마지막 200줄만 남긴다.
+      - name: Build ISO
+        shell: bash
+        run: |
+          set -euo pipefail
+          nix build --print-out-paths --option log-lines 200 -o result-iso \
+            .#packages.x86_64-linux.ryoku-iso
+          ls -la result-iso/iso
+          sha256sum result-iso/iso/*.iso | tee result-iso.sha256
+          df -h /
+
+      - name: Upload ISO
+        uses: actions/upload-artifact@v4
+        with:
+          name: ryoku-x86_64-iso
+          path: |
+            result-iso/iso/*.iso
+            result-iso.sha256
+          compression-level: 0
+          retention-days: 7
+          if-no-files-found: error

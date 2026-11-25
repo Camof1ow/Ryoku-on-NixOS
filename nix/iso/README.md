@@ -60,9 +60,18 @@ outside that file are rejected instead of guessing whether old UUIDs are safe.
 If the flake exposes more than one `nixosConfiguration`, the host must be chosen
 explicitly.
 
-**Guided dual boot / preserve-existing-partitions is not implemented yet.** The
-selected installation disk is erased. Advanced users can leave the installer
-and use the normal NixOS live shell for manual partitioning.
+**설치 디스크의 일부 파티션만 바꾸기(듀얼 부팅).** 기본은 고른 디스크 전체를 지운다. 다른 OS나 데이터
+파티션을 남기려면 지울 파티션 번호를 `RYOKU_INSTALL_REPLACE_PARTITIONS`에 적고 터미널 모드로 실행한다.
+
+```bash
+RYOKU_INSTALL_REPLACE_PARTITIONS="1 2" ryoku-install --iso --cli --disk /dev/nvme1n1
+```
+
+적은 파티션만 지우고, 가장 큰 빈 구간에 ESP(1GiB)와 루트를 만든다. 나머지 파티션은 그대로 둔다.
+설치기는 지울 번호와 디스크 파티션 표를 보여 준 뒤 디스크 경로를 다시 입력받는다. 번호가 디스크에
+없거나 숫자가 아니면 디스크를 건드리기 전에 멈춘다. UEFI에서만 쓸 수 있다. 다른 디스크에 있는
+Windows는 systemd-boot 메뉴에 저절로 나오지 않으므로 펌웨어 부팅 메뉴에서 고르거나
+`boot.loader.systemd-boot.windows`를 쓴다.
 
 ## Installed `/etc/nixos`
 

@@ -210,6 +210,25 @@ zenbook_partitions_to_replace() {
       else empty end'
 }
 
+# RYOKU_INSTALL_REPLACE_PARTITIONS("1 2" 또는 "1,2")에 적은 설치 디스크의 파티션 번호를 한 줄에 하나씩
+# 출력한다. 적은 파티션만 지우고 나머지(다른 OS, 데이터)는 남겨, 지운 자리에 ESP와 루트를 만든다.
+# 숫자가 아니거나 디스크에 없는 번호가 있으면 실패하므로, 부르는 쪽은 디스크를 건드리기 전에 멈춘다.
+requested_partitions_to_replace() {
+  local number present
+  local -a numbers=() seen=()
+  present="$(lsblk -J -o PARTN,TYPE "$1" | jq -r '.. | objects | select(.type == "part") | .partn')"
+  IFS=', ' read -r -a numbers <<< "${RYOKU_INSTALL_REPLACE_PARTITIONS:-}"
+  for number in "${numbers[@]}"; do
+    [ -n "$number" ] || continue
+    [[ "$number" =~ ^[1-9][0-9]*$ ]] || die "RYOKU_INSTALL_REPLACE_PARTITIONS: '$number' is not a partition number"
+    grep -qx "$number" <<< "$present" || die "RYOKU_INSTALL_REPLACE_PARTITIONS: $1 has no partition $number"
+    [[ " ${seen[*]} " == *" $number "* ]] && continue
+    seen+=("$number")
+    printf '%s\n' "$number"
+  done
+  [ "${#seen[@]}" -gt 0 ] || die "RYOKU_INSTALL_REPLACE_PARTITIONS lists no partition"
+}
+
 # The live ISO exposes its embedded Ryoku tree through /etc/ryoku/source, which
 # resolves through /etc/static and is not a valid target-flake input during
 # pure evaluation. Persist that source beside the installed flake and use a
@@ -967,17 +986,25 @@ install_iso() {
     fi
   fi
 
-  # Zenbook A14는 퀄컴·ASUS 플랫폼 파티션을 남기고 나머지 파티션만 바꾼다.
-  local replace_list=""
+  # 지울 파티션을 고른다. RYOKU_INSTALL_REPLACE_PARTITIONS가 있으면 적은 번호만 지운다(듀얼 부팅).
+  # 없으면 Zenbook A14는 퀄컴·ASUS 플랫폼 파티션을 남기고 나머지를 지우고, 그 밖에는 디스크 전체를 쓴다.
+  local replace_list="" keep_note=""
   local -a replace_parts=()
-  if [ "$firmware" = "uefi" ] && [ "$(detect_hardware_profile)" = asus-zenbook-a14 ]; then
+  if [ -n "${RYOKU_INSTALL_REPLACE_PARTITIONS:-}" ]; then
+    [ "$firmware" = "uefi" ] || die "RYOKU_INSTALL_REPLACE_PARTITIONS needs UEFI firmware; nothing was changed"
+    replace_list="$(requested_partitions_to_replace "$install_disk")" ||
+      die "RYOKU_INSTALL_REPLACE_PARTITIONS does not match $install_disk; nothing was changed"
+    keep_note="Every other partition on $install_disk is kept."
+  elif [ "$firmware" = "uefi" ] && [ "$(detect_hardware_profile)" = asus-zenbook-a14 ]; then
     replace_list="$(zenbook_partitions_to_replace "$install_disk")"
-    [ -z "$replace_list" ] || mapfile -t replace_parts <<< "$replace_list"
+    keep_note="The Qualcomm/ASUS firmware partitions on this disk are kept."
   fi
+  [ -z "$replace_list" ] || mapfile -t replace_parts <<< "$replace_list"
 
   if [ "${#replace_parts[@]}" -gt 0 ]; then
     printf '\nWARNING: PARTITIONS %s ON %s WILL BE PERMANENTLY ERASED.\n' "${replace_parts[*]}" "$install_disk"
-    printf 'The Qualcomm/ASUS firmware partitions on this disk are kept.\n'
+    printf '%s\n' "$keep_note"
+    lsblk -o NAME,PARTN,SIZE,FSTYPE,PARTLABEL,LABEL "$install_disk"
   else
     printf '\n%s\n' "WARNING: ALL DATA ON $install_disk WILL BE PERMANENTLY ERASED."
   fi

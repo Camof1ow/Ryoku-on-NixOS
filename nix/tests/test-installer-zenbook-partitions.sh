@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Zenbook A14 설치 때 지울 파티션 고르기를 실제 디스크 배치(lsblk -J)로 확인한다.
+# 설치 때 지울 파티션 고르기(Zenbook 자동 선택, RYOKU_INSTALL_REPLACE_PARTITIONS 지정)를 실제 디스크 배치(lsblk -J)로 확인한다.
 set -euo pipefail
 
 backend=${RYOKU_INSTALL_BACKEND_SOURCE:?}
@@ -15,6 +15,8 @@ extract_function() {
 eval "$(grep '^zenbook_platform_partlabels=' "$backend")"
 eval "$(extract_function zenbook_partitions_to_replace)"
 eval "$(extract_function path_prefix_exists)"
+eval "$(extract_function requested_partitions_to_replace)"
+die() { printf '%s\n' "$*" >&2; exit 1; }
 
 fixture=""
 lsblk() { printf '%s\n' "$fixture"; }
@@ -61,6 +63,33 @@ fixture='{"blockdevices":[{"partn":null,"partlabel":null,"label":null,"type":"di
 {"partn":1,"partlabel":"EFI system partition","label":"SYSTEM","type":"part"},
 {"partn":2,"partlabel":"Basic data partition","label":"Windows","type":"part"}]}'
 expect generic-disk ''
+
+# 사용자가 적은 번호만 지운다. 사무실 PC 두 번째 디스크: macOS(APFS)·OpenCore(FAT32)를 지우고 exFAT 데이터는 남긴다.
+fixture='{"blockdevices":[{"partn":null,"partlabel":null,"label":null,"type":"disk"},
+{"partn":1,"partlabel":"Untitled","label":null,"type":"part"},
+{"partn":2,"partlabel":"Basic data partition","label":"EFI","type":"part"},
+{"partn":3,"partlabel":"Basic data partition","label":"DATA","type":"part"}]}'
+expect_requested() {
+  local name=$1 value=$2 want=$3 got
+  got="$(RYOKU_INSTALL_REPLACE_PARTITIONS=$value requested_partitions_to_replace /dev/nvme1n1 | paste -sd' ' -)"
+  [ "$got" = "$want" ] || {
+    printf '%s: expected [%s], got [%s]\n' "$name" "$want" "$got" >&2
+    exit 1
+  }
+}
+expect_rejected() {
+  if (RYOKU_INSTALL_REPLACE_PARTITIONS=$2 requested_partitions_to_replace /dev/nvme1n1 >/dev/null 2>&1); then
+    printf '%s: expected rejection\n' "$1" >&2
+    exit 1
+  fi
+}
+expect_requested comma-list '1,2' '1 2'
+expect_requested space-list '2 1' '2 1'
+expect_requested duplicate '1, 1 2' '1 2'
+expect_rejected missing-partition '1 4'
+expect_rejected not-a-number 'p1'
+expect_rejected zero '0'
+expect_rejected only-separators ' , '
 
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
