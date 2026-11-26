@@ -25,7 +25,6 @@ in
         enable = true;
         package = ryokuNixpkgs.kdePackages.kdeconnect-kde;
       };
-      services.udev.packages = [ ryokuNixpkgs.android-udev-rules ];
       services.avahi.enable = lib.mkDefault true;
       environment.systemPackages = [
         ryokuNixpkgs.scrcpy
