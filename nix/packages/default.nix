@@ -92,6 +92,10 @@ let
     inherit pkgs src desktopData;
   };
 
+  rashinApp = import ./ryoku-rashin-app.nix {
+    inherit pkgs src;
+  };
+
   prowlAgent = import ./prowl-agent.nix {
     inherit pkgs;
   };
@@ -319,6 +323,7 @@ let
       hub
       paletteBridge
       rashin
+      rashinApp
       prowlAgent
       ryostore
       ryomotion
@@ -350,6 +355,7 @@ in
     hub
     paletteBridge
     rashin
+    rashinApp
     prowlAgent
     ryostore
     ryomotion
