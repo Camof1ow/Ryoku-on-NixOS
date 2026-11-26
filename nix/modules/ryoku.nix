@@ -2114,6 +2114,11 @@ in
         materializer
       ];
 
+      # materialize는 compositor 단축키를 다시 만든다. 단축키 생성기는 실행할 프로그램
+      # (ryoku-rashin, rashin-app 등)이 PATH에 없으면 그 단축키를 뺀다. 이 서비스의 기본
+      # PATH(coreutils 등)만으로는 로그인·switch마다 Alt+Space와 Super+Alt+Space가 사라졌다.
+      path = runtimePackages;
+
       serviceConfig = {
         Type = "oneshot";
         RemainAfterExit = true;
