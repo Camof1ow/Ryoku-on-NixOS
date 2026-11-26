@@ -2032,6 +2032,26 @@ in
       };
     };
 
+    # Rashin은 시작할 때 `systemctl --user start ryoku-prowl.service`로 Prowl 게이트웨이를 띄운다.
+    # 업스트림 ryoku/rashin/systemd/ryoku-prowl.service를 Nix 저장소 경로로 옮긴 것이다.
+    # 포트는 Rashin 기본값(8788, RYOKU_PROWL_PORT 미설정)과 같다.
+    systemd.user.services.ryoku-prowl = {
+      description = "Ryoku Prowl: model gateway and code intelligence for Rashin";
+
+      bindsTo = [ "ryoku-rashin.service" ];
+      after = [ "ryoku-rashin.service" ];
+
+      unitConfig.StartLimitIntervalSec = 0;
+
+      serviceConfig = {
+        ExecStartPre = "-${ryokuBundle}/bin/prowl gateway down --port 8788";
+        ExecStart = "${ryokuBundle}/bin/prowl gateway serve --port 8788";
+        Restart = "on-failure";
+        RestartSec = 2;
+        NoNewPrivileges = true;
+      };
+    };
+
     # Refresh the AI usage caches consumed by Ryoku's bar.
     #
     # These mirror upstream's ryoku-ai-usage.service/timer, but
